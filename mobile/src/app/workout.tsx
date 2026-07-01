@@ -15,7 +15,44 @@ import api from '@/constants/api';
 import { useAuth } from '@/hooks/useAuth';
 import { translations } from '../utils/translations';
 import { Ionicons } from '@expo/vector-icons';
-import { exercisesDatabase } from '../data/workoutPresets';
+const exercisesDatabase = [
+  // Peito
+  { name: 'Supino Reto com Barra', category: 'Peito' },
+  { name: 'Supino Inclinado com Halteres', category: 'Peito' },
+  { name: 'Crucifixo Reto com Halteres', category: 'Peito' },
+  { name: 'Crossover na Polia', category: 'Peito' },
+  // Costas
+  { name: 'Puxada Aberta no Pulley', category: 'Costas' },
+  { name: 'Remada Curvada com Barra', category: 'Costas' },
+  { name: 'Remada Baixa Sentada', category: 'Costas' },
+  { name: 'Pull-down na Polia', category: 'Costas' },
+  // Pernas
+  { name: 'Agachamento Livre com Barra', category: 'Pernas' },
+  { name: 'Leg Press 45', category: 'Pernas' },
+  { name: 'Cadeira Extensora', category: 'Pernas' },
+  { name: 'Cadeira Flexora', category: 'Pernas' },
+  { name: 'Stiff com Halteres', category: 'Pernas' },
+  { name: 'Elevação Pélvica', category: 'Pernas' },
+  { name: 'Gêmeos Sentado (Panturrilha)', category: 'Pernas' },
+  // Ombros
+  { name: 'Desenvolvimento com Halteres', category: 'Ombros' },
+  { name: 'Elevação Lateral com Halteres', category: 'Ombros' },
+  { name: 'Elevação Frontal na Polia', category: 'Ombros' },
+  { name: 'Crucifixo Invertido (Posterior)', category: 'Ombros' },
+  // Tríceps
+  { name: 'Tríceps Pulley (Corda ou Barra)', category: 'Tríceps' },
+  { name: 'Tríceps Testa com Halteres', category: 'Tríceps' },
+  { name: 'Tríceps Francês na Polia', category: 'Tríceps' },
+  // Bíceps
+  { name: 'Rosca Direta com Barra W', category: 'Bíceps' },
+  { name: 'Rosca Alternada com Halteres', category: 'Bíceps' },
+  { name: 'Rosca Martelo com Halteres', category: 'Bíceps' },
+  // Core
+  { name: 'Abdominal Supra na Prancha', category: 'Core' },
+  { name: 'Abdominal Infra na Paralela', category: 'Core' },
+  { name: 'Prancha Isométrica', category: 'Core' },
+  { name: 'Extensão Lombar (Banco Romano)', category: 'Core' }
+];
 
 export default function WorkoutScreen() {
   const { lang } = useAuth();
@@ -237,7 +274,7 @@ export default function WorkoutScreen() {
         { text: 'Cancelar', style: 'cancel' },
         { 
           text: 'Criar', 
-          onPress: async (name) => {
+          onPress: async (name: any) => {
             if (!name) return;
             try {
               await api.post('/api/workout/day', { name, description: '' });
@@ -949,7 +986,7 @@ const styles: any = StyleSheet.create({
   restTimerBtnText: {
     color: '#6366f1',
     fontSize: 10,
-    fontWeight: '850',
+    fontWeight: '800',
   },
   chargeRow: {
     flexDirection: 'row',
@@ -1259,6 +1296,6 @@ const styles: any = StyleSheet.create({
   modalBtnText: {
     color: '#ffffff',
     fontSize: 12,
-    fontWeight: '750',
+    fontWeight: '700',
   },
 });
