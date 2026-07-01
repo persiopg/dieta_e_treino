@@ -502,6 +502,10 @@ export default function App() {
                 setDiet={handleUpdateDiet}
                 profile={profile}
                 lang={lang}
+                activeDate={activeDate}
+                setActiveDate={handleActiveDateChange}
+                dietLogs={dietLogs}
+                onRefreshData={() => fetchPlannerAndLogs(false, activeDate)}
               />
             )}
 

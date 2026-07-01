@@ -129,7 +129,7 @@ export default function SettingsScreen() {
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>{translations[lang].goal}</Text>
               <Text style={styles.infoValue}>
-                {translations[lang][profile.goal] || profile.goal}
+                {(translations[lang] as any)[profile.goal] || profile.goal}
               </Text>
             </View>
 
