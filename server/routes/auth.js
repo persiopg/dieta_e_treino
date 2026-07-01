@@ -210,4 +210,17 @@ router.put('/profile', authMiddleware, async (req, res) => {
   }
 });
 
+// @route   DELETE /api/auth/account
+// @desc    Excluir a conta do usuário e todos os registros associados
+router.delete('/account', authMiddleware, async (req, res) => {
+  try {
+    const pool = getPool();
+    await pool.query('DELETE FROM users WHERE id = ?', [req.userId]);
+    res.json({ message: 'Conta excluída com sucesso.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao excluir a conta.' });
+  }
+});
+
 export default router;

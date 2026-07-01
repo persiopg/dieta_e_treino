@@ -7,6 +7,8 @@ import trackerRoutes from './routes/tracker.js';
 import dietRoutes from './routes/diet.js';
 import workoutRoutes from './routes/workout.js';
 
+import os from 'os';
+
 dotenv.config();
 
 const app = express();
@@ -33,10 +35,24 @@ async function startServer() {
     // Inicializar conexão e tabelas do MySQL
     await initDatabase();
     
-    app.listen(PORT, () => {
+    // Obter o IP de rede local
+    const networkInterfaces = os.networkInterfaces();
+    let localIP = 'localhost';
+    for (const name in networkInterfaces) {
+      for (const iface of networkInterfaces[name]) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          localIP = iface.address;
+          break;
+        }
+      }
+    }
+
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`====================================================`);
-      console.log(`Servidor rodando com sucesso na porta: ${PORT}`);
-      console.log(`Endpoint de status: http://localhost:${PORT}/health`);
+      console.log(`Servidor rodando com sucesso!`);
+      console.log(`Local: http://localhost:${PORT}/health`);
+      console.log(`Rede Local: http://${localIP}:${PORT}/health`);
+      console.log(`Use este IP no aplicativo móvel: ${localIP}`);
       console.log(`====================================================`);
     });
   } catch (error) {

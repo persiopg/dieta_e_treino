@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { translations } from '../utils/translations';
 import { 
   Droplet, 
   Flame, 
@@ -25,7 +26,8 @@ export default function Dashboard({
   waterIntake, 
   setWaterIntake, 
   workoutDoneToday, 
-  setWorkoutDoneToday 
+  setWorkoutDoneToday,
+  lang = 'pt'
 }) {
   const [weightInput, setWeightInput] = useState(profile?.weight || '');
   const [weightSuccess, setWeightSuccess] = useState(false);
@@ -79,34 +81,65 @@ export default function Dashboard({
 
   // Frase de conselho dinâmico da IA
   const getAiMessage = () => {
-    if (waterPercentage < 50) {
+    if (lang === 'en') {
+      if (waterPercentage < 50) {
+        return {
+          text: 'Remember to drink water! Proper hydration helps with protein synthesis and fat loss.',
+          variant: 'warning'
+        };
+      }
+      if (!workoutDoneToday) {
+        return {
+          text: `How about doing today's workout? The current routine is "${workout?.name || 'Workout'}".`,
+          variant: 'info'
+        };
+      }
+      if (caloriePercentage > 95 && caloriePercentage <= 105) {
+        return {
+          text: 'Excellent! You hit your daily calorie target almost perfectly.',
+          variant: 'success'
+        };
+      }
+      if (caloriePercentage > 105) {
+        return {
+          text: 'You exceeded your planned calories. Adjust your next meals or increase energy expenditure.',
+          variant: 'danger'
+        };
+      }
       return {
-        text: 'Lembre-se de beber água! A hidratação adequada ajuda na síntese proteica e na queima de gordura.',
-        variant: 'warning'
+        text: 'Your day is going great! Keep logging your meals to stay focused on the goal.',
+        variant: 'success'
       };
-    }
-    if (!workoutDoneToday) {
+    } else {
+      if (waterPercentage < 50) {
+        return {
+          text: 'Lembre-se de beber água! A hidratação adequada ajuda na síntese proteica e na queima de gordura.',
+          variant: 'warning'
+        };
+      }
+      if (!workoutDoneToday) {
+        return {
+          text: `Que tal realizar seu treino de hoje? O preset atual é o "${workout?.name || 'Treino'}".`,
+          variant: 'info'
+        };
+      }
+      if (caloriePercentage > 95 && caloriePercentage <= 105) {
+        return {
+          text: 'Excelente! Você bateu a sua meta calórica diária quase perfeitamente.',
+          variant: 'success'
+        };
+      }
+      if (caloriePercentage > 105) {
+        return {
+          text: 'Você ultrapassou as calorias planejadas. Ajuste as próximas refeições ou aumente o gasto calórico.',
+          variant: 'danger'
+        };
+      }
       return {
-        text: `Que tal realizar seu treino de hoje? O preset atual é o "${workout?.name || 'Treino'}".`,
-        variant: 'info'
-      };
-    }
-    if (caloriePercentage > 95 && caloriePercentage <= 105) {
-      return {
-        text: 'Excelente! Você bateu a sua meta calórica diária quase perfeitamente.',
+        text: 'Seu dia está indo muito bem! Continue registrando suas refeições para manter o foco na meta.',
         variant: 'success'
       };
     }
-    if (caloriePercentage > 105) {
-      return {
-        text: 'Você ultrapassou as calorias planejadas. Ajuste as próximas refeições ou aumente o gasto calórico.',
-        variant: 'danger'
-      };
-    }
-    return {
-      text: 'Seu dia está indo muito bem! Continue registrando suas refeições para manter o foco na meta.',
-      variant: 'success'
-    };
   };
 
   const aiMessage = getAiMessage();
@@ -126,15 +159,15 @@ export default function Dashboard({
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight text-zinc-950 dark:text-zinc-50">
-            Olá, Campeão! 🚀
+            {translations[lang].welcome} {profile?.gender === 'female' || profile?.gender === 'feminino' ? translations[lang].campea : translations[lang].campeao}
           </h1>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Aqui está o resumo do seu desempenho físico e nutricional para hoje.
+            {translations[lang].subtitle}
           </p>
         </div>
         <div className="flex items-center gap-3 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 text-xs font-semibold text-zinc-600 dark:text-zinc-400">
           <Calendar className="w-4 h-4 text-blue-500" />
-          <span>Hoje, {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'short' })}</span>
+          <span>{lang === 'pt' ? 'Hoje' : 'Today'}, {new Date().toLocaleDateString(lang === 'pt' ? 'pt-BR' : 'en-US', { weekday: 'long', day: 'numeric', month: 'short' })}</span>
         </div>
       </div>
 
@@ -149,7 +182,7 @@ export default function Dashboard({
           <Sparkles className="w-4 h-4 text-blue-500" />
         </div>
         <div>
-          <span className="text-xs font-bold uppercase tracking-wider block mb-0.5">Insight do seu Assistente</span>
+          <span className="text-xs font-bold uppercase tracking-wider block mb-0.5">{translations[lang].insightTitle}</span>
           <p className="text-sm leading-relaxed font-medium">{aiMessage.text}</p>
         </div>
       </div>
@@ -159,7 +192,7 @@ export default function Dashboard({
         {/* KPI: Calorias */}
         <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-sm space-y-2">
           <div className="flex justify-between items-center text-zinc-500">
-            <span className="text-xs font-bold uppercase tracking-wide">Calorias Ingeridas</span>
+            <span className="text-xs font-bold uppercase tracking-wide">{lang === 'pt' ? 'Calorias Ingeridas' : 'Calories Consumed'}</span>
             <Flame className="w-4 h-4 text-rose-500" />
           </div>
           <div className="flex items-baseline gap-2">
@@ -170,9 +203,11 @@ export default function Dashboard({
             <div className="h-full bg-rose-500 rounded-full" style={{ width: `${caloriePercentage}%` }}></div>
           </div>
           <div className="text-[11px] font-semibold text-zinc-500 flex justify-between">
-            <span>{caloriePercentage}% da meta</span>
+            <span>{caloriePercentage}% {lang === 'pt' ? 'da meta' : 'of goal'}</span>
             <span className={remainingCalories >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
-              {remainingCalories >= 0 ? `${remainingCalories} kcal restantes` : `${Math.abs(remainingCalories)} kcal acima`}
+              {remainingCalories >= 0 
+                ? `${remainingCalories} ${lang === 'pt' ? 'kcal restantes' : 'kcal remaining'}` 
+                : `${Math.abs(remainingCalories)} ${lang === 'pt' ? 'kcal acima' : 'kcal over'}`}
             </span>
           </div>
         </div>
@@ -180,7 +215,7 @@ export default function Dashboard({
         {/* KPI: Água */}
         <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-sm space-y-2">
           <div className="flex justify-between items-center text-zinc-500">
-            <span className="text-xs font-bold uppercase tracking-wide">Hidratação diária</span>
+            <span className="text-xs font-bold uppercase tracking-wide">{lang === 'pt' ? 'Hidratação Diária' : 'Daily Hydration'}</span>
             <Droplet className="w-4 h-4 text-blue-500" />
           </div>
           <div className="flex items-baseline gap-2">
@@ -191,26 +226,26 @@ export default function Dashboard({
             <div className="h-full bg-blue-500 rounded-full" style={{ width: `${waterPercentage}%` }}></div>
           </div>
           <div className="text-[11px] font-semibold text-zinc-500 flex justify-between">
-            <span>{waterPercentage}% da meta</span>
-            <span>Meta: {(waterTarget / 1000).toFixed(1)} Litros</span>
+            <span>{waterPercentage}% {lang === 'pt' ? 'da meta' : 'of goal'}</span>
+            <span>{lang === 'pt' ? 'Meta' : 'Goal'}: {(waterTarget / 1000).toFixed(1)} {lang === 'pt' ? 'Litros' : 'Liters'}</span>
           </div>
         </div>
 
         {/* KPI: Treino */}
         <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-sm space-y-2">
           <div className="flex justify-between items-center text-zinc-500">
-            <span className="text-xs font-bold uppercase tracking-wide">Treino do Dia</span>
+            <span className="text-xs font-bold uppercase tracking-wide">{translations[lang].workoutToday}</span>
             <Dumbbell className="w-4 h-4 text-emerald-500" />
           </div>
           <div className="flex items-center gap-2 py-1">
             {workoutDoneToday ? (
               <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold text-lg">
                 <CheckCircle className="w-5 h-5" />
-                <span>Treino Feito!</span>
+                <span>{lang === 'pt' ? 'Treino Feito!' : 'Workout Done!'}</span>
               </div>
             ) : (
               <div className="text-zinc-800 dark:text-zinc-200 font-bold text-md truncate max-w-full">
-                {workout ? workout.name.split(' (')[0] : 'Nenhum Ativo'}
+                {workout ? workout.name.split(' (')[0] : (lang === 'pt' ? 'Nenhum Ativo' : 'None Active')}
               </div>
             )}
           </div>
@@ -218,12 +253,12 @@ export default function Dashboard({
             <div className={`h-full rounded-full ${workoutDoneToday ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'}`} style={{ width: workoutDoneToday ? '100%' : '30%' }}></div>
           </div>
           <div className="text-[11px] font-semibold text-zinc-500 flex justify-between">
-            <span>{workoutDoneToday ? 'Concluído hoje' : 'Aguardando execução'}</span>
+            <span>{workoutDoneToday ? (lang === 'pt' ? 'Concluído hoje' : 'Completed today') : (lang === 'pt' ? 'Aguardando execução' : 'Awaiting completion')}</span>
             <button 
               onClick={() => setActiveTab('workout')} 
               className="text-blue-500 hover:underline font-bold text-[11px]"
             >
-              Acessar treinos
+              {lang === 'pt' ? 'Acessar treinos' : 'Access workouts'}
             </button>
           </div>
         </div>
@@ -231,7 +266,7 @@ export default function Dashboard({
         {/* KPI: Peso Atual */}
         <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-sm space-y-2">
           <div className="flex justify-between items-center text-zinc-500">
-            <span className="text-xs font-bold uppercase tracking-wide">Peso Atual</span>
+            <span className="text-xs font-bold uppercase tracking-wide">{translations[lang].currentWeight}</span>
             <Scale className="w-4 h-4 text-indigo-500" />
           </div>
           <div className="flex items-baseline justify-between w-full">
@@ -241,7 +276,7 @@ export default function Dashboard({
             </div>
             <button 
               onClick={() => {
-                const newW = window.prompt("Digite o seu peso atual (em kg):", profile.weight);
+                const newW = window.prompt(lang === 'pt' ? 'Digite o seu peso atual (em kg):' : 'Enter your current weight (in kg):', profile.weight);
                 if (newW && Number(newW) > 0) {
                   setProfile({
                     ...profile,
@@ -251,15 +286,15 @@ export default function Dashboard({
               }}
               className="text-xs text-indigo-500 hover:underline font-bold"
             >
-              Atualizar
+              {translations[lang].weightBtn}
             </button>
           </div>
           <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
             <div className="h-full bg-indigo-500 rounded-full" style={{ width: '100%' }}></div>
           </div>
           <div className="text-[11px] font-semibold text-zinc-500 flex justify-between">
-            <span>Objetivo: {profile.goal === 'emagrecimento' ? 'Reduzir' : profile.goal === 'hipertrofia' ? 'Aumentar' : 'Manter'}</span>
-            <span className="capitalize font-bold text-indigo-500">{profile.goal}</span>
+            <span>{translations[lang].goal}: {profile.goal === 'emagrecimento' ? (lang === 'pt' ? 'Reduzir' : 'Lose') : profile.goal === 'hipertrofia' ? (lang === 'pt' ? 'Aumentar' : 'Gain') : (lang === 'pt' ? 'Manter' : 'Maintain')}</span>
+            <span className="capitalize font-bold text-indigo-500">{translations[lang][profile.goal] || profile.goal}</span>
           </div>
         </div>
       </div>
@@ -272,13 +307,13 @@ export default function Dashboard({
           <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-4">
             <h3 className="text-lg font-bold text-zinc-950 dark:text-zinc-50 flex items-center gap-2">
               <Apple className="w-5 h-5 text-rose-500" />
-              Consumo de Macronutrientes
+              {lang === 'pt' ? 'Consumo de Macronutrientes' : 'Macronutrient Intake'}
             </h3>
             <button 
               onClick={() => setActiveTab('diet')}
               className="text-xs font-bold text-blue-500 hover:underline"
             >
-              Ir para Dieta
+              {lang === 'pt' ? 'Ir para Dieta' : 'Go to Diet'}
             </button>
           </div>
 
@@ -286,43 +321,43 @@ export default function Dashboard({
             {/* Proteínas */}
             <div className="border border-zinc-100 dark:border-zinc-800 rounded-xl p-4 space-y-3 bg-zinc-50/50 dark:bg-zinc-900/10">
               <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-zinc-500">Proteínas (P)</span>
+                <span className="text-xs font-bold text-zinc-500">{translations[lang].protein} (P)</span>
                 <span className="text-xs font-semibold text-rose-500 font-mono">{consumedProtein}g / {profile.macros.protein}g</span>
               </div>
               <div className="relative h-3 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
                 <div className="h-full bg-rose-500 rounded-full transition-all" style={{ width: `${proteinPercentage}%` }}></div>
               </div>
-              <span className="text-[10px] text-zinc-400 block font-semibold">{proteinPercentage}% da meta diária</span>
+              <span className="text-[10px] text-zinc-400 block font-semibold">{proteinPercentage}% {lang === 'pt' ? 'da meta diária' : 'of daily target'}</span>
             </div>
 
             {/* Carboidratos */}
             <div className="border border-zinc-100 dark:border-zinc-800 rounded-xl p-4 space-y-3 bg-zinc-50/50 dark:bg-zinc-900/10">
               <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-zinc-500">Carboidratos (C)</span>
+                <span className="text-xs font-bold text-zinc-500">{translations[lang].carbs} (C)</span>
                 <span className="text-xs font-semibold text-blue-500 font-mono">{consumedCarbs}g / {profile.macros.carbs}g</span>
               </div>
               <div className="relative h-3 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
                 <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${carbsPercentage}%` }}></div>
               </div>
-              <span className="text-[10px] text-zinc-400 block font-semibold">{carbsPercentage}% da meta diária</span>
+              <span className="text-[10px] text-zinc-400 block font-semibold">{carbsPercentage}% {lang === 'pt' ? 'da meta diária' : 'of daily target'}</span>
             </div>
 
             {/* Gorduras */}
             <div className="border border-zinc-100 dark:border-zinc-800 rounded-xl p-4 space-y-3 bg-zinc-50/50 dark:bg-zinc-900/10">
               <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-zinc-500">Gorduras (G)</span>
+                <span className="text-xs font-bold text-zinc-500">{translations[lang].fat} (G)</span>
                 <span className="text-xs font-semibold text-amber-500 font-mono">{consumedFat}g / {profile.macros.fat}g</span>
               </div>
               <div className="relative h-3 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
                 <div className="h-full bg-amber-500 rounded-full transition-all" style={{ width: `${fatPercentage}%` }}></div>
               </div>
-              <span className="text-[10px] text-zinc-400 block font-semibold">{fatPercentage}% da meta diária</span>
+              <span className="text-[10px] text-zinc-400 block font-semibold">{fatPercentage}% {lang === 'pt' ? 'da meta diária' : 'of daily target'}</span>
             </div>
           </div>
 
           {/* Gráfico Visual de Linha Simples (Status do plano) */}
           <div className="border border-zinc-100 dark:border-zinc-800 rounded-xl p-4 bg-zinc-50/20 dark:bg-zinc-900/5">
-            <span className="text-xs font-bold text-zinc-400 uppercase tracking-wide block mb-3">Refeições de hoje</span>
+            <span className="text-xs font-bold text-zinc-400 uppercase tracking-wide block mb-3">{lang === 'pt' ? 'Refeições de hoje' : "Today's meals"}</span>
             {diet && diet.meals && diet.meals.length > 0 ? (
               <div className="space-y-3">
                 {diet.meals.map((meal, index) => {
@@ -334,7 +369,7 @@ export default function Dashboard({
                     <div key={index} className="flex justify-between items-center text-sm border-b border-zinc-50 dark:border-zinc-900/50 pb-2 last:border-0 last:pb-0">
                       <span className="font-bold text-zinc-800 dark:text-zinc-200">{meal.name}</span>
                       <div className="flex items-center gap-3">
-                        <span className="font-mono text-zinc-500 dark:text-zinc-400 text-xs">{meal.items?.length || 0} alimentos</span>
+                        <span className="font-mono text-zinc-500 dark:text-zinc-400 text-xs">{meal.items?.length || 0} {lang === 'pt' ? 'alimentos' : 'foods'}</span>
                         <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100">{mealCal} kcal</span>
                       </div>
                     </div>
@@ -342,7 +377,7 @@ export default function Dashboard({
                 })}
               </div>
             ) : (
-              <div className="text-center py-4 text-xs text-zinc-400">Nenhuma refeição configurada na dieta atual.</div>
+              <div className="text-center py-4 text-xs text-zinc-400">{lang === 'pt' ? 'Nenhuma refeição configurada na dieta atual.' : 'No meals configured in the current diet.'}</div>
             )}
           </div>
         </div>
@@ -353,10 +388,12 @@ export default function Dashboard({
           <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm space-y-4">
             <h3 className="text-lg font-bold text-zinc-950 dark:text-zinc-50 flex items-center gap-2">
               <Droplet className="w-5 h-5 text-blue-500" />
-              Controle de Hidratação
+              {translations[lang].waterTitle}
             </h3>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-              Consumir água melhora a oxigenação muscular e ajuda no bom funcionamento do organismo durante exercícios intensos.
+              {lang === 'pt' 
+                ? 'Consumir água melhora a oxigenação muscular e ajuda no bom funcionamento do organismo durante exercícios intensos.' 
+                : 'Consuming water improves muscle oxygenation and helps the body function properly during intense workouts.'}
             </p>
 
             <div className="flex justify-center py-2">
@@ -392,7 +429,7 @@ export default function Dashboard({
               onClick={handleWaterReset}
               className="w-full flex items-center justify-center gap-1.5 border border-transparent text-[11px] font-semibold text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-lg py-1 transition-all"
             >
-              <RotateCcw className="w-3 h-3" /> Reiniciar Contador
+              <RotateCcw className="w-3 h-3" /> {lang === 'pt' ? 'Reiniciar Contador' : 'Reset Counter'}
             </button>
           </div>
 
@@ -400,7 +437,7 @@ export default function Dashboard({
           <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm space-y-4">
             <h3 className="text-lg font-bold text-zinc-950 dark:text-zinc-50 flex items-center gap-2">
               <Scale className="w-5 h-5 text-indigo-500" />
-              Atualizar Peso
+              {translations[lang].weightText}
             </h3>
             <div className="flex gap-2">
               <div className="relative flex-1">
@@ -428,12 +465,12 @@ export default function Dashboard({
                 }}
                 className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 rounded-xl shadow-sm transition-all"
               >
-                Salvar
+                {translations[lang].save}
               </button>
             </div>
 
             {weightSuccess && (
-              <span className="text-[11px] text-emerald-600 font-bold block">Peso atualizado com sucesso! Os cálculos do planejamento serão ajustados no próximo wizard.</span>
+              <span className="text-[11px] text-emerald-600 font-bold block">{lang === 'pt' ? 'Peso atualizado com sucesso! Os cálculos do planejamento serão ajustados no próximo wizard.' : 'Weight updated successfully! Plan calculations will be adjusted in the next wizard.'}</span>
             )}
           </div>
         </div>

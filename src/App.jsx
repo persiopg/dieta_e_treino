@@ -9,6 +9,7 @@ import LandingPage from './components/LandingPage';
 import Login from './components/Login';
 import Register from './components/Register';
 import HistoryTracker from './components/HistoryTracker';
+import { translations } from './utils/translations';
 import { 
   Sparkles, 
   Dumbbell, 
@@ -48,6 +49,7 @@ export default function App() {
   const [darkMode, setDarkMode] = useLocalStorage('fitlife_dark_mode', true);
   const [activeTab, setActiveTab] = useState('home');
   const [authView, setAuthView] = useState(null); // 'login', 'register' ou null (se logado ou apenas navegando)
+  const [lang, setLang] = useLocalStorage('fitlife_lang', 'pt');
 
   // Configurar cabeçalho padrão do Axios com o Token
   useEffect(() => {
@@ -275,7 +277,7 @@ export default function App() {
                       : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
                   }`}
                 >
-                  <LayoutDashboard className="w-3.5 h-3.5" /> Dashboard
+                  <LayoutDashboard className="w-3.5 h-3.5" /> {translations[lang].dashboard}
                 </button>
                 <button
                   onClick={() => { setActiveTab('diet'); setAuthView(null); }}
@@ -285,7 +287,7 @@ export default function App() {
                       : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
                   }`}
                 >
-                  <Apple className="w-3.5 h-3.5" /> Dieta
+                  <Apple className="w-3.5 h-3.5" /> {translations[lang].diet}
                 </button>
                 <button
                   onClick={() => { setActiveTab('workout'); setAuthView(null); }}
@@ -295,7 +297,7 @@ export default function App() {
                       : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
                   }`}
                 >
-                  <Dumbbell className="w-3.5 h-3.5" /> Treino
+                  <Dumbbell className="w-3.5 h-3.5" /> {translations[lang].workout}
                 </button>
                 <button
                   onClick={() => { setActiveTab('history'); setAuthView(null); }}
@@ -305,7 +307,7 @@ export default function App() {
                       : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
                   }`}
                 >
-                  <TrendingUp className="w-3.5 h-3.5" /> Histórico
+                  <TrendingUp className="w-3.5 h-3.5" /> {translations[lang].history}
                 </button>
               </>
             ) : null}
@@ -318,7 +320,7 @@ export default function App() {
                   : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
               }`}
             >
-              <BookOpen className="w-3.5 h-3.5" /> Institucional
+              <BookOpen className="w-3.5 h-3.5" /> {translations[lang].institutional}
             </button>
 
             {token && (
@@ -330,13 +332,23 @@ export default function App() {
                     : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
                 }`}
               >
-                <Sparkles className="w-3.5 h-3.5" /> {profile ? 'Recalcular Plano' : 'Assistente'}
+                <Sparkles className="w-3.5 h-3.5" /> {profile ? translations[lang].recalculate : 'Assistente'}
               </button>
             )}
           </nav>
 
           {/* Botões de Ações de Header */}
           <div className="flex items-center gap-3">
+            {/* Seletor de Idioma */}
+            <button
+              onClick={() => setLang(lang === 'pt' ? 'en' : 'pt')}
+              className="px-3 py-2 text-xs font-bold rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0f] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-all shadow-sm flex items-center gap-1.5"
+              title={lang === 'pt' ? "Switch to English" : "Mudar para Português"}
+            >
+              <span>🌐</span>
+              <span className="hidden sm:inline">{lang === 'pt' ? 'PT' : 'EN'}</span>
+            </button>
+
             {/* Toggle Escuro/Claro */}
             <button
               onClick={() => setDarkMode(!darkMode)}
@@ -354,7 +366,7 @@ export default function App() {
                 title="Resetar Dados"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Resetar</span>
+                <span className="hidden sm:inline">{translations[lang].reset}</span>
               </button>
             ) : null}
 
@@ -364,7 +376,7 @@ export default function App() {
                 className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-bold border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300 rounded-xl transition-all shadow-sm bg-white dark:bg-[#0c0c0f]"
               >
                 <LogOut className="w-3.5 h-3.5 text-rose-500" />
-                <span className="hidden sm:inline">Sair</span>
+                <span className="hidden sm:inline">{translations[lang].logout}</span>
               </button>
             ) : (
               <button
@@ -372,7 +384,7 @@ export default function App() {
                 className="flex items-center gap-1.5 px-4 py-2.5 text-xs font-extrabold bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all shadow-sm"
               >
                 <LogIn className="w-3.5 h-3.5" />
-                <span>Entrar</span>
+                <span>{lang === 'pt' ? 'Entrar' : 'Login'}</span>
               </button>
             )}
           </div>
@@ -429,6 +441,7 @@ export default function App() {
                 setWaterIntake={handleWaterChange}
                 workoutDoneToday={workoutDoneToday}
                 setWorkoutDoneToday={handleWorkoutDoneChange}
+                lang={lang}
               />
             )}
 
@@ -437,6 +450,7 @@ export default function App() {
                 diet={diet}
                 setDiet={handleUpdateDiet}
                 profile={profile}
+                lang={lang}
               />
             )}
 
@@ -446,12 +460,14 @@ export default function App() {
                 setWorkout={handleUpdateWorkout}
                 workoutDoneToday={workoutDoneToday}
                 setWorkoutDoneToday={handleWorkoutDoneChange}
+                lang={lang}
               />
             )}
 
             {activeTab === 'history' && profile && token && (
               <HistoryTracker 
                 profile={profile}
+                lang={lang}
               />
             )}
           </>
@@ -472,7 +488,7 @@ export default function App() {
               }`}
             >
               <LayoutDashboard className="w-5 h-5" />
-              <span className="text-[9px]">Home</span>
+              <span className="text-[9px]">{translations[lang].dashboard}</span>
             </button>
             
             <button
@@ -484,7 +500,7 @@ export default function App() {
               }`}
             >
               <Apple className="w-5 h-5" />
-              <span className="text-[9px]">Dieta</span>
+              <span className="text-[9px]">{translations[lang].diet}</span>
             </button>
 
             <button
@@ -496,7 +512,7 @@ export default function App() {
               }`}
             >
               <Dumbbell className="w-5 h-5" />
-              <span className="text-[9px]">Treino</span>
+              <span className="text-[9px]">{translations[lang].workout}</span>
             </button>
 
             <button
@@ -508,7 +524,7 @@ export default function App() {
               }`}
             >
               <TrendingUp className="w-5 h-5" />
-              <span className="text-[9px]">Evolução</span>
+              <span className="text-[9px]">{translations[lang].history}</span>
             </button>
           </>
         ) : null}
@@ -522,7 +538,7 @@ export default function App() {
           }`}
         >
           <BookOpen className="w-5 h-5" />
-          <span className="text-[9px]">Sobre</span>
+          <span className="text-[9px]">{translations[lang].institutional}</span>
         </button>
 
         <button
