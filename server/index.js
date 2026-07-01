@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { initDatabase } from './config/db.js';
 import authRoutes from './routes/auth.js';
 import trackerRoutes from './routes/tracker.js';
+import dietTrackerRoutes from './routes/dietTracker.js';
 import dietRoutes from './routes/diet.js';
 import workoutRoutes from './routes/workout.js';
 
@@ -21,6 +22,7 @@ app.use(express.json());
 // Registro de rotas da API
 app.use('/api/auth', authRoutes);
 app.use('/api/tracker', trackerRoutes);
+app.use('/api/tracker/diet', dietTrackerRoutes);
 app.use('/api/diet', dietRoutes);
 app.use('/api/workout', workoutRoutes);
 

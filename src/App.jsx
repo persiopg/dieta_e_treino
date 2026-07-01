@@ -9,6 +9,7 @@ import LandingPage from './components/LandingPage';
 import Login from './components/Login';
 import Register from './components/Register';
 import HistoryTracker from './components/HistoryTracker';
+import Settings from './components/Settings';
 import { translations } from './utils/translations';
 import { 
   Sparkles, 
@@ -22,7 +23,8 @@ import {
   BookOpen,
   UserPlus,
   RefreshCw,
-  TrendingUp
+  TrendingUp,
+  Settings as SettingsIcon
 } from 'lucide-react';
 import './App.css';
 
@@ -44,6 +46,8 @@ export default function App() {
   const [workout, setWorkout] = useState(null);
   const [waterIntake, setWaterIntake] = useState(0);
   const [workoutDoneToday, setWorkoutDoneToday] = useState(false);
+  const [dietLogs, setDietLogs] = useState([]);
+  const [activeDate, setActiveDate] = useState(() => getLocalDateString());
   
   // Estados Globais de Interface
   const [darkMode, setDarkMode] = useLocalStorage('fitlife_dark_mode', true);
@@ -63,6 +67,8 @@ export default function App() {
       setWorkout(null);
       setWaterIntake(0);
       setWorkoutDoneToday(false);
+      setDietLogs([]);
+      setActiveDate(getLocalDateString());
     }
   }, [token]);
 
@@ -76,6 +82,17 @@ export default function App() {
     }
   }, [darkMode]);
 
+  // Polling em segundo plano para sincronizar alterações feitas no Mobile em "tempo real"
+  useEffect(() => {
+    if (!token || !profile) return;
+
+    const interval = setInterval(() => {
+      fetchPlannerAndLogs(false, activeDate); // Sincroniza dados em background usando a data ativa
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [token, profile, activeDate]);
+
   // Buscar os dados do usuário a partir da API
   const fetchUserData = async () => {
     try {
@@ -84,8 +101,8 @@ export default function App() {
       
       if (res.data.profile) {
         setProfile(res.data.profile);
-        // Buscar dieta, treinos e logs se houver perfil ativo
-        fetchPlannerAndLogs();
+        // Buscar dieta, treinos e logs se houver perfil ativo e direcionar para o Dashboard (passando data de hoje)
+        fetchPlannerAndLogs(true, getLocalDateString());
       } else {
         setProfile(null);
         setActiveTab('wizard'); // Direcionar direto para o assistente
@@ -96,23 +113,27 @@ export default function App() {
     }
   };
 
-  const fetchPlannerAndLogs = async () => {
+  const fetchPlannerAndLogs = async (shouldRedirect = false, targetDate = null) => {
     try {
-      const today = getLocalDateString();
+      const dateToFetch = targetDate || activeDate || getLocalDateString();
       
-      const [dietRes, workoutRes, waterRes, workoutDoneRes] = await Promise.all([
+      const [dietRes, workoutRes, waterRes, workoutDoneRes, dietLogsRes] = await Promise.all([
         axios.get('/api/diet'),
         axios.get('/api/workout'),
-        axios.get(`/api/tracker/water?date=${today}`),
-        axios.get(`/api/tracker/workout-done?date=${today}`)
+        axios.get(`/api/tracker/water?date=${dateToFetch}`),
+        axios.get(`/api/tracker/workout-done?date=${dateToFetch}`),
+        axios.get(`/api/tracker/diet?date=${dateToFetch}`).catch(() => ({ data: [] }))
       ]);
 
       setDiet(dietRes.data);
       setWorkout(workoutRes.data);
       setWaterIntake(waterRes.data.amount_ml);
       setWorkoutDoneToday(workoutDoneRes.data.isDone);
+      setDietLogs(dietLogsRes.data);
       
-      setActiveTab('dashboard');
+      if (shouldRedirect) {
+        setActiveTab('dashboard');
+      }
     } catch (err) {
       console.error('Erro ao sincronizar planejadores do BD.', err);
     }
@@ -123,7 +144,7 @@ export default function App() {
     setAuthView(null);
     if (user.profile) {
       setProfile(user.profile);
-      fetchPlannerAndLogs();
+      fetchPlannerAndLogs(true); // Redirecionar para dashboard no login
     } else {
       setProfile(null);
       setActiveTab('wizard');
@@ -234,6 +255,14 @@ export default function App() {
     }
   };
 
+  // Sincronizar atualizações de perfil da tela de Ajustes/Configurações
+  const handleUpdateProfileFromSettings = (updatedProfile, shouldReloadTotal = false) => {
+    setProfile(updatedProfile);
+    if (shouldReloadTotal) {
+      fetchPlannerAndLogs(false);
+    }
+  };
+
   // Rastrear alterações na dieta feitas no DietPlanner
   const handleUpdateDiet = async (updatedDiet) => {
     // Sincronizar o estado local
@@ -247,6 +276,12 @@ export default function App() {
   // Rastrear alterações no treino feitas no WorkoutPlanner
   const handleUpdateWorkout = async (updatedWorkout) => {
     setWorkout(updatedWorkout);
+  };
+
+  // Gerenciar alteração de data ativa no Dashboard
+  const handleActiveDateChange = (newDate) => {
+    setActiveDate(newDate);
+    fetchPlannerAndLogs(false, newDate);
   };
 
   return (
@@ -309,21 +344,33 @@ export default function App() {
                 >
                   <TrendingUp className="w-3.5 h-3.5" /> {translations[lang].history}
                 </button>
+                <button
+                  onClick={() => { setActiveTab('settings'); setAuthView(null); }}
+                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-all ${
+                    activeTab === 'settings'
+                      ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  <SettingsIcon className="w-3.5 h-3.5" /> {translations[lang].settings}
+                </button>
               </>
             ) : null}
 
-            <button
-              onClick={() => { setActiveTab('home'); setAuthView(null); }}
-              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-all ${
-                activeTab === 'home' && authView === null
-                  ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-sm'
-                  : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
-              }`}
-            >
-              <BookOpen className="w-3.5 h-3.5" /> {translations[lang].institutional}
-            </button>
+            {!token && (
+              <button
+                onClick={() => { setActiveTab('home'); setAuthView(null); }}
+                className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-all ${
+                  activeTab === 'home' && authView === null
+                    ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5" /> {translations[lang].institutional}
+              </button>
+            )}
 
-            {token && (
+            {token && !profile && (
               <button
                 onClick={() => { setActiveTab('wizard'); setAuthView(null); }}
                 className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-all ${
@@ -332,7 +379,7 @@ export default function App() {
                     : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
                 }`}
               >
-                <Sparkles className="w-3.5 h-3.5" /> {profile ? translations[lang].recalculate : 'Assistente'}
+                <Sparkles className="w-3.5 h-3.5" /> {translations[lang].recalculate}
               </button>
             )}
           </nav>
@@ -442,6 +489,10 @@ export default function App() {
                 workoutDoneToday={workoutDoneToday}
                 setWorkoutDoneToday={handleWorkoutDoneChange}
                 lang={lang}
+                activeDate={activeDate}
+                setActiveDate={handleActiveDateChange}
+                dietLogs={dietLogs}
+                onRefreshData={() => fetchPlannerAndLogs(false, activeDate)}
               />
             )}
 
@@ -467,6 +518,14 @@ export default function App() {
             {activeTab === 'history' && profile && token && (
               <HistoryTracker 
                 profile={profile}
+                lang={lang}
+              />
+            )}
+
+            {activeTab === 'settings' && profile && token && (
+              <Settings 
+                profile={profile}
+                onUpdateProfile={handleUpdateProfileFromSettings}
                 lang={lang}
               />
             )}
@@ -526,39 +585,55 @@ export default function App() {
               <TrendingUp className="w-5 h-5" />
               <span className="text-[9px]">{translations[lang].history}</span>
             </button>
+
+            <button
+              onClick={() => { setActiveTab('settings'); setAuthView(null); }}
+              className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
+                activeTab === 'settings'
+                  ? 'text-blue-600 dark:text-blue-400 font-bold'
+                  : 'text-zinc-400 font-medium'
+              }`}
+            >
+              <SettingsIcon className="w-5 h-5" />
+              <span className="text-[9px]">{translations[lang].settings}</span>
+            </button>
           </>
         ) : null}
 
-        <button
-          onClick={() => { setActiveTab('home'); setAuthView(null); }}
-          className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
-            activeTab === 'home' && authView === null
-              ? 'text-blue-600 dark:text-blue-400 font-bold'
-              : 'text-zinc-400 font-medium'
-          }`}
-        >
-          <BookOpen className="w-5 h-5" />
-          <span className="text-[9px]">{translations[lang].institutional}</span>
-        </button>
+        {!token && (
+          <button
+            onClick={() => { setActiveTab('home'); setAuthView(null); }}
+            className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
+              activeTab === 'home' && authView === null
+                ? 'text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-zinc-400 font-medium'
+            }`}
+          >
+            <BookOpen className="w-5 h-5" />
+            <span className="text-[9px]">{translations[lang].institutional}</span>
+          </button>
+        )}
 
-        <button
-          onClick={() => {
-            if (token) {
-              setActiveTab('wizard');
-              setAuthView(null);
-            } else {
-              setAuthView('login');
-            }
-          }}
-          className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
-            activeTab === 'wizard' || authView !== null
-              ? 'text-indigo-600 dark:text-indigo-400 font-bold'
-              : 'text-zinc-400 font-medium'
-          }`}
-        >
-          {token ? <Sparkles className="w-5 h-5" /> : <LogIn className="w-5 h-5" />}
-          <span className="text-[9px]">{token ? (profile ? 'Assistente' : 'Calcular') : 'Entrar'}</span>
-        </button>
+        {(!token || !profile) && (
+          <button
+            onClick={() => {
+              if (token) {
+                setActiveTab('wizard');
+                setAuthView(null);
+              } else {
+                setAuthView('login');
+              }
+            }}
+            className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
+              activeTab === 'wizard' || authView !== null
+                ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                : 'text-zinc-400 font-medium'
+            }`}
+          >
+            {token ? <Sparkles className="w-5 h-5" /> : <LogIn className="w-5 h-5" />}
+            <span className="text-[9px]">{token ? 'Calcular' : 'Entrar'}</span>
+          </button>
+        )}
       </div>
 
       {/* Espaçador para navegação mobile no rodapé */}

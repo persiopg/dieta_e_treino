@@ -146,6 +146,22 @@ async function createTables() {
       fat DECIMAL(5,2) NOT NULL,
       calories INT NOT NULL,
       FOREIGN KEY (diet_meal_id) REFERENCES diet_meals(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB;`,
+
+    // Tabela: Diet Logs (Diário Alimentar - Registro real de consumo)
+    `CREATE TABLE IF NOT EXISTS diet_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      meal_name VARCHAR(255) NOT NULL,
+      food_name VARCHAR(255) NOT NULL,
+      quantity DECIMAL(7,2) NOT NULL,
+      protein DECIMAL(5,2) NOT NULL,
+      carbs DECIMAL(5,2) NOT NULL,
+      fat DECIMAL(5,2) NOT NULL,
+      calories INT NOT NULL,
+      logged_date DATE NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB;`
   ];
 
