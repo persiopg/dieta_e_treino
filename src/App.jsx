@@ -46,6 +46,7 @@ export default function App() {
   const [workout, setWorkout] = useState(null);
   const [waterIntake, setWaterIntake] = useState(0);
   const [workoutDoneToday, setWorkoutDoneToday] = useState(false);
+  const [loggedWorkoutName, setLoggedWorkoutName] = useState(null);
   const [dietLogs, setDietLogs] = useState([]);
   const [activeDate, setActiveDate] = useState(() => getLocalDateString());
   
@@ -67,6 +68,7 @@ export default function App() {
       setWorkout(null);
       setWaterIntake(0);
       setWorkoutDoneToday(false);
+      setLoggedWorkoutName(null);
       setDietLogs([]);
       setActiveDate(getLocalDateString());
     }
@@ -129,6 +131,7 @@ export default function App() {
       setWorkout(workoutRes.data);
       setWaterIntake(waterRes.data.amount_ml);
       setWorkoutDoneToday(workoutDoneRes.data.isDone);
+      setLoggedWorkoutName(workoutDoneRes.data.workout_day_name || null);
       setDietLogs(dietLogsRes.data);
       
       if (shouldRedirect) {
@@ -225,14 +228,19 @@ export default function App() {
     }
   };
 
-  // Rastrear treino concluído reativamente (atualizar no banco)
-  const handleWorkoutDoneChange = async (isDone) => {
+  // Salvar check-in de treino no dia ativo
+  const handleWorkoutCheckIn = async (workoutName) => {
+    const isDone = workoutName !== 'Descanso' && workoutName !== null;
+    setLoggedWorkoutName(workoutName);
     setWorkoutDoneToday(isDone);
     if (token) {
       try {
-        const today = getLocalDateString();
-        const dayName = workout?.days?.[0]?.name || 'Treino Concluído';
-        await axios.post('/api/tracker/workout-done', { workout_day_name: dayName, date: today, isDone });
+        await axios.post('/api/tracker/workout-done', {
+          workout_day_name: workoutName || 'Descanso',
+          date: activeDate,
+          isDone: workoutName !== null
+        });
+        fetchPlannerAndLogs(false, activeDate);
       } catch (err) {
         console.error('Erro ao atualizar status do treino no banco.', err);
       }
@@ -513,9 +521,11 @@ export default function App() {
               <WorkoutPlanner 
                 workout={workout}
                 setWorkout={handleUpdateWorkout}
-                workoutDoneToday={workoutDoneToday}
-                setWorkoutDoneToday={handleWorkoutDoneChange}
+                loggedWorkoutName={loggedWorkoutName}
+                onWorkoutCheckIn={handleWorkoutCheckIn}
                 lang={lang}
+                activeDate={activeDate}
+                setActiveDate={handleActiveDateChange}
               />
             )}
 

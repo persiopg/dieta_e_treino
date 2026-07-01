@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { exercisesDatabase } from '../data/workoutPresets';
+import { translations } from '../utils/translations';
 import { 
   Play, 
   Check, 
@@ -12,16 +13,28 @@ import {
   RotateCcw,
   Sparkles,
   StopCircle,
-  PlusCircle
+  PlusCircle,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Edit2,
+  FileText,
+  Trash
 } from 'lucide-react';
 
-export default function WorkoutPlanner({ workout, setWorkout, workoutDoneToday, setWorkoutDoneToday }) {
+export default function WorkoutPlanner({ 
+  workout, 
+  setWorkout, 
+  loggedWorkoutName, 
+  onWorkoutCheckIn, 
+  lang = 'pt', 
+  activeDate, 
+  setActiveDate 
+}) {
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
-  const [isExecuting, setIsExecuting] = useState(false);
-  
-  // Estado para execução do treino
-  const [completedSets, setCompletedSets] = useState({}); // chave: `${exerciseIndex}-${setIndex}`, valor: bool
-  const [exerciseWeights, setExerciseWeights] = useState({}); // chave: exerciseIndex, valor: weight (string/number)
+  const [isEditingBasePlan, setIsEditingBasePlan] = useState(false);
+  const [showAddExerciseModal, setShowAddExerciseModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   
   // Timer de descanso
   const [timerDuration, setTimerDuration] = useState(0);
@@ -29,9 +42,10 @@ export default function WorkoutPlanner({ workout, setWorkout, workoutDoneToday, 
   const [timerActive, setTimerActive] = useState(false);
   const timerRef = useRef(null);
 
-  // Modais de Edição
-  const [showAddExerciseModal, setShowAddExerciseModal] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  // Estado para conclusão de séries locais e pesos na execução
+  const [completedSets, setCompletedSets] = useState({});
+  const [exerciseWeights, setExerciseWeights] = useState({});
+
   const [newExerciseForm, setNewExerciseForm] = useState({
     name: '',
     category: 'Peito',
@@ -41,7 +55,7 @@ export default function WorkoutPlanner({ workout, setWorkout, workoutDoneToday, 
     weight: 0
   });
 
-  // Atualizar cargas de peso locais quando o dia ou o treino mudar
+  // Atualizar cargas de peso locais ao mudar a ficha selecionada
   useEffect(() => {
     if (workout?.days?.[selectedDayIndex]) {
       const weights = {};
@@ -49,7 +63,6 @@ export default function WorkoutPlanner({ workout, setWorkout, workoutDoneToday, 
         weights[idx] = ex.weight || '';
       });
       setExerciseWeights(weights);
-      // Resetar sets concluídos
       setCompletedSets({});
     }
   }, [selectedDayIndex, workout]);
@@ -70,118 +83,57 @@ export default function WorkoutPlanner({ workout, setWorkout, workoutDoneToday, 
     } else {
       clearInterval(timerRef.current);
     }
-
     return () => clearInterval(timerRef.current);
   }, [timerActive, timerSecondsLeft]);
 
-  // Função para mudar o preset de treino completo no MySQL
+  // Alterar preset de treino completo
   const handlePresetSelect = async (presetKey) => {
-    if (window.confirm('Tem certeza que deseja substituir seu treino atual por este preset? Todas as customizações anteriores serão limpas.')) {
+    if (window.confirm(lang === 'pt' ? 'Substituir treino atual por este preset? Customizações serão limpas.' : 'Replace training with preset? Changes lost.')) {
       try {
         const res = await axios.post('/api/workout/preset', { presetKey });
         setWorkout(res.data);
         setSelectedDayIndex(0);
-        setIsExecuting(false);
       } catch (err) {
-        console.error('Erro ao salvar preset de treinos.', err);
-        alert('Erro ao carregar o preset.');
+        console.error(err);
       }
     }
   };
 
-  // Iniciar execução do treino
-  const handleStartWorkout = () => {
-    setIsExecuting(true);
-    setCompletedSets({});
-  };
-
-  // Finalizar execução do treino e salvar as cargas no MySQL
-  const handleFinishWorkout = async () => {
-    setIsExecuting(false);
-    setWorkoutDoneToday(true);
-    setTimerActive(false);
-    setTimerSecondsLeft(0);
-    
-    const day = workout.days[selectedDayIndex];
+  // Salvar nova carga de exercício da ficha no banco de dados
+  const handleWeightChange = async (ex, val) => {
+    const numericWeight = Number(val);
+    if (isNaN(numericWeight)) return;
     try {
-      // 1. Atualizar todas as cargas alteradas na execução
-      const updatePromises = day.exercises.map((ex, idx) => {
-        if (exerciseWeights[idx] !== undefined && exerciseWeights[idx] !== '') {
-          return axios.put(`/api/workout/day/${day.id}/exercise/${ex.id}`, { weight: Number(exerciseWeights[idx]) });
-        }
-        return Promise.resolve();
-      });
-      await Promise.all(updatePromises);
-
-      // 2. Chamar o log de treino feito no banco
-      setWorkoutDoneToday(true);
-
-      // 3. Recarregar do banco para atualizar o estado completo
-      const res = await axios.get('/api/workout');
-      setWorkout(res.data);
-
-      alert('Parabéns! Treino concluído e registrado no seu histórico diário. Cargas salvas!');
+      const day = workout.days[selectedDayIndex];
+      await axios.put(`/api/workout/day/${day.id}/exercise/${ex.id}`, { weight: numericWeight });
+      const updatedWorkout = { ...workout };
+      const exIdx = updatedWorkout.days[selectedDayIndex].exercises.findIndex(e => e.id === ex.id);
+      if (exIdx !== -1) {
+        updatedWorkout.days[selectedDayIndex].exercises[exIdx].weight = numericWeight;
+      }
+      setWorkout(updatedWorkout);
     } catch (err) {
-      console.error('Erro ao salvar cargas de treino no MySQL.', err);
+      console.error(err);
     }
   };
 
-  // Cancelar execução
-  const handleCancelWorkout = () => {
-    if (window.confirm('Deseja realmente cancelar o treino atual? O progresso desta sessão será perdido.')) {
-      setIsExecuting(false);
-      setTimerActive(false);
-      setTimerSecondsLeft(0);
-    }
-  };
-
-  // Marcar/Desmarcar Set como feito
-  const toggleSetComplete = (exIdx, setIdx, restTime) => {
-    const key = `${exIdx}-${setIdx}`;
-    const isNowDone = !completedSets[key];
-    
-    setCompletedSets(prev => ({
-      ...prev,
-      [key]: isNowDone
-    }));
-
-    if (isNowDone) {
-      // Iniciar o timer de descanso automaticamente
-      startRestTimer(restTime);
-    }
-  };
-
-  const startRestTimer = (seconds) => {
-    setTimerDuration(seconds);
-    setTimerSecondsLeft(seconds);
-    setTimerActive(true);
-  };
-
-  const handleWeightChange = (exIdx, val) => {
-    setExerciseWeights(prev => ({
-      ...prev,
-      [exIdx]: val
-    }));
-  };
-
-  // Deletar um exercício do dia atual no banco
+  // Deletar exercício
   const handleDeleteExercise = async (exIdx) => {
     const day = workout.days[selectedDayIndex];
     const ex = day.exercises[exIdx];
-
-    if (window.confirm('Deseja excluir este exercício do seu treino?')) {
+    if (window.confirm(lang === 'pt' ? 'Excluir exercício da ficha?' : 'Delete exercise?')) {
       try {
         await axios.delete(`/api/workout/day/${day.id}/exercise/${ex.id}`);
         const updatedWorkout = { ...workout };
         updatedWorkout.days[selectedDayIndex].exercises.splice(exIdx, 1);
         setWorkout(updatedWorkout);
       } catch (err) {
-        console.error('Erro ao excluir exercício do banco.', err);
+        console.error(err);
       }
     }
   };
 
-  // Adicionar Exercício da biblioteca ao dia atual no banco
+  // Adicionar exercício padrão
   const handleAddExercise = async (selectedExercise) => {
     const day = workout.days[selectedDayIndex];
     try {
@@ -192,510 +144,550 @@ export default function WorkoutPlanner({ workout, setWorkout, workoutDoneToday, 
         rest: newExerciseForm.rest,
         weight: newExerciseForm.weight || 0
       });
-
       const updatedWorkout = { ...workout };
       updatedWorkout.days[selectedDayIndex].exercises.push(res.data);
       setWorkout(updatedWorkout);
       setShowAddExerciseModal(false);
     } catch (err) {
-      console.error('Erro ao adicionar exercício no banco.', err);
+      console.error(err);
     }
   };
 
-  // Criar exercício totalmente novo e adicionar no banco
-  const handleCreateCustomExercise = async () => {
-    if (!newExerciseForm.name.trim()) return alert('Insira o nome do exercício');
-    const day = workout.days[selectedDayIndex];
-
+  // Adicionar Ficha de Treino Base
+  const handleCreateNewDay = async () => {
+    const defaultName = `Ficha ${String.fromCharCode(65 + (workout?.days?.length || 0))}`;
+    const name = window.prompt(lang === 'pt' ? 'Qual o nome do novo dia de treino?' : 'Name of new workout day?', defaultName);
+    if (!name) return;
     try {
-      const res = await axios.post(`/api/workout/day/${day.id}/exercise`, {
-        name: newExerciseForm.name,
-        sets: newExerciseForm.sets,
-        reps: newExerciseForm.reps,
-        rest: newExerciseForm.rest,
-        weight: newExerciseForm.weight || 0
-      });
-
-      const updatedWorkout = { ...workout };
-      updatedWorkout.days[selectedDayIndex].exercises.push(res.data);
-      setWorkout(updatedWorkout);
-      setShowAddExerciseModal(false);
-    } catch (err) {
-      console.error('Erro ao criar exercício customizado no banco.', err);
-    }
-  };
-
-  // Adicionar um novo dia de treino customizado no banco
-  const handleAddNewDay = async () => {
-    const dayLetter = String.fromCharCode(65 + (workout?.days?.length || 0)); // A, B, C...
-    const dayName = `Treino ${dayLetter}: Novo Dia Customizado`;
-
-    try {
-      const res = await axios.post('/api/workout/day', { name: dayName });
+      const res = await axios.post('/api/workout/day', { name, description: '' });
       const updatedWorkout = { ...workout };
       if (!updatedWorkout.days) updatedWorkout.days = [];
-      updatedWorkout.days.push(res.data);
+      updatedWorkout.days.push({ ...res.data, exercises: [] });
       setWorkout(updatedWorkout);
       setSelectedDayIndex(updatedWorkout.days.length - 1);
     } catch (err) {
-      console.error('Erro ao criar novo dia de treino no banco.', err);
+      console.error(err);
     }
   };
 
-  // Excluir o dia de treino inteiro do banco
-  const handleDeleteDay = async () => {
-    const day = workout.days[selectedDayIndex];
-
-    if (workout.days.length <= 1) {
-      return alert('Você precisa de pelo menos 1 dia de treino estruturado.');
-    }
-    if (window.confirm(`Deseja excluir permanentemente o "${day.name}"?`)) {
+  // Deletar Ficha de Treino Base
+  const handleDeleteDay = async (dayId) => {
+    if (window.confirm(lang === 'pt' ? 'Deseja excluir esta ficha de treinos completa?' : 'Delete this complete workout?')) {
       try {
-        await axios.delete(`/api/workout/day/${day.id}`);
+        await axios.delete(`/api/workout/day/${dayId}`);
         const updatedWorkout = { ...workout };
-        updatedWorkout.days.splice(selectedDayIndex, 1);
+        updatedWorkout.days = updatedWorkout.days.filter(d => d.id !== dayId);
         setWorkout(updatedWorkout);
         setSelectedDayIndex(0);
       } catch (err) {
-        console.error('Erro ao excluir dia de treino no banco.', err);
+        console.error(err);
       }
     }
   };
 
-  // Filtragem para o modal de busca de exercícios
-  const filteredExercises = exercisesDatabase.filter(ex => 
-    ex.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    ex.category.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const formatTimerTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  // Controle do Timer de Descanso
+  const startRestTimer = (seconds) => {
+    setTimerDuration(seconds);
+    setTimerSecondsLeft(seconds);
+    setTimerActive(true);
   };
 
-  const activeDay = workout?.days?.[selectedDayIndex];
+  const toggleSetComplete = (exIdx, setIdx, restTime) => {
+    const key = `${exIdx}-${setIdx}`;
+    const isNowDone = !completedSets[key];
+    setCompletedSets(prev => ({ ...prev, [key]: isNowDone }));
+    if (isNowDone) {
+      startRestTimer(restTime);
+    }
+  };
+
+  // ==========================================
+  // NAVEGAÇÃO DE DATAS
+  // ==========================================
+  const handlePrevDay = () => {
+    const d = new Date(activeDate + 'T12:00:00');
+    d.setDate(d.getDate() - 1);
+    setActiveDate(d.toISOString().split('T')[0]);
+  };
+
+  const handleNextDay = () => {
+    const d = new Date(activeDate + 'T12:00:00');
+    d.setDate(d.getDate() + 1);
+    setActiveDate(d.toISOString().split('T')[0]);
+  };
+
+  const formatDateDisplay = (dateStr) => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    
+    if (dateStr === todayStr) return lang === 'pt' ? 'Hoje' : 'Today';
+    if (dateStr === yesterdayStr) return lang === 'pt' ? 'Ontem' : 'Yesterday';
+    const [year, month, day] = dateStr.split('-');
+    const d = new Date(year, month - 1, day);
+    return d.toLocaleDateString(lang === 'pt' ? 'pt-BR' : 'en-US', { day: 'numeric', month: 'short', weekday: 'short' });
+  };
+
+  // Ficha correspondente ao check-in realizado
+  const loggedFicha = workout?.days?.find(d => d.name === loggedWorkoutName);
 
   return (
-    <div className="w-full max-w-[1600px] mx-auto p-4 md:p-6 space-y-6">
+    <div className="w-full max-w-[1600px] mx-auto p-4 md:p-6 space-y-6 pb-24">
       
-      {/* Cabeçalho da Seção de Treinos */}
+      {/* Cabeçalho */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight text-zinc-950 dark:text-zinc-50 flex items-center gap-2">
-            <Dumbbell className="w-8 h-8 text-blue-500" />
-            Estrutura de Treino
+            <Dumbbell className="w-8 h-8 text-indigo-500" />
+            {lang === 'pt' ? 'Fichas e Diário de Treinos' : 'Workout Hub'}
           </h1>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Plano ativo: <strong className="text-zinc-900 dark:text-zinc-100">{workout?.name || 'Montagem Livre'}</strong>
+            {lang === 'pt' ? 'Monte suas rotinas padrão (Aside) e registre o que treinou no diário de cada dia (Body).' : 'Plan cards & log active sessions.'}
           </p>
-        </div>
-
-        {/* Escolha Rápida de Presets */}
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => handlePresetSelect('fullbody3x')}
-            className="text-xs bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-3 py-2 rounded-xl font-semibold transition-all"
-          >
-            Preset 3x (FB)
-          </button>
-          <button
-            onClick={() => handlePresetSelect('upperlower4x')}
-            className="text-xs bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-3 py-2 rounded-xl font-semibold transition-all"
-          >
-            Preset 4x (UL)
-          </button>
-          <button
-            onClick={() => handlePresetSelect('ppl6x')}
-            className="text-xs bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-3 py-2 rounded-xl font-semibold transition-all"
-          >
-            Preset 6x (PPL)
-          </button>
         </div>
       </div>
 
-      {/* Timer Flutuante Ativo */}
-      {timerActive && (
-        <div className="fixed bottom-6 right-6 bg-zinc-950 text-white rounded-2xl border border-zinc-800 shadow-2xl p-4 flex items-center gap-4 z-50 animate-bounce">
-          <div className="relative flex items-center justify-center w-12 h-12 rounded-full border-2 border-blue-500">
-            <Timer className="w-5 h-5 text-blue-400 absolute" />
-          </div>
-          <div>
-            <span className="text-[10px] uppercase font-bold text-zinc-400 block tracking-wide">Descanso</span>
-            <span className="font-mono text-2xl font-black">{formatTimerTime(timerSecondsLeft)}</span>
-          </div>
-          <button 
-            onClick={() => setTimerActive(false)}
-            className="p-2 hover:bg-zinc-800 rounded-xl text-rose-500"
-          >
-            <StopCircle className="w-5 h-5" />
-          </button>
-        </div>
-      )}
+      {/* Grid Central (ASIDE + BODY) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        
+        {/* ASIDE (ESQUERDA - 1/3): ROTINAS DE TREINO BASE */}
+        <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm space-y-6">
+          <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-3">
+            <div>
+              <h3 className="font-extrabold text-sm text-zinc-900 dark:text-zinc-50 flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-zinc-400" />
+                {lang === 'pt' ? 'Fichas Planejadas' : 'Workout Plans'}
+              </h3>
+              <span className="text-[10px] text-zinc-400 font-bold block mt-0.5">
+                {workout?.days?.length || 0} {lang === 'pt' ? 'rotinas ativas' : 'active plans'}
+              </span>
+            </div>
 
-      {/* Navegação entre dias de treino */}
-      {workout?.days && workout.days.length > 0 ? (
-        <div className="flex flex-wrap gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-3">
-          {workout.days.map((day, idx) => (
             <button
-              key={idx}
-              onClick={() => {
-                if (isExecuting) {
-                  if (window.confirm('Você está executando outro treino. Mudar de aba perderá seu progresso de execução atual.')) {
-                    setIsExecuting(false);
-                    setSelectedDayIndex(idx);
-                  }
-                } else {
-                  setSelectedDayIndex(idx);
-                }
-              }}
-              className={`px-4 py-2 text-sm font-bold rounded-xl border transition-all ${
-                selectedDayIndex === idx
-                  ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400'
-                  : 'border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900'
+              onClick={() => setIsEditingBasePlan(!isEditingBasePlan)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                isEditingBasePlan 
+                  ? 'bg-emerald-500 text-white shadow-sm' 
+                  : 'bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800'
               }`}
             >
-              {day.name.split(':')[0]}
+              {isEditingBasePlan ? <Check className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
+              {isEditingBasePlan ? (lang === 'pt' ? 'Concluir' : 'Done') : (lang === 'pt' ? 'Editar' : 'Edit')}
             </button>
-          ))}
-          {!isExecuting && (
-            <button
-              onClick={handleAddNewDay}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold rounded-xl border border-dashed border-zinc-300 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-all"
-            >
-              <Plus className="w-4 h-4" /> Adicionar Dia
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="text-center py-12 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-2xl">
-          <Dumbbell className="w-12 h-12 text-zinc-400 mx-auto mb-2" />
-          <h3 className="text-md font-bold text-zinc-800 dark:text-zinc-200">Nenhum dia de treino</h3>
-          <button onClick={handleAddNewDay} className="mt-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm">
-            Criar Treino A
-          </button>
-        </div>
-      )}
+          </div>
 
-      {/* Visão do Dia Selecionado */}
-      {activeDay && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* Card Principal: Exercícios */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm">
-              <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-4 mb-4">
-                <div>
-                  <h3 className="text-lg font-bold text-zinc-950 dark:text-zinc-50">
-                    {activeDay.name}
-                  </h3>
-                  <span className="text-xs text-zinc-500 font-medium">
-                    {activeDay.exercises.length} exercícios cadastrados
-                  </span>
-                </div>
-                {!isExecuting ? (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleDeleteDay}
-                      className="text-xs border border-zinc-200 dark:border-zinc-800 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-500 px-3 py-2 rounded-xl font-semibold transition-all"
-                    >
-                      Excluir Dia
-                    </button>
-                    {activeDay.exercises.length > 0 && (
+          {/* Abas das Fichas no Aside */}
+          <div className="flex flex-col gap-2.5">
+            {workout?.days?.map((day, idx) => (
+              <div 
+                key={day.id}
+                className={`w-full rounded-xl border p-3.5 text-left transition-all ${
+                  selectedDayIndex === idx 
+                    ? 'border-indigo-500 bg-indigo-500/5' 
+                    : 'border-zinc-100 dark:border-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-900'
+                }`}
+              >
+                <div className="flex justify-between items-center">
+                  <button 
+                    onClick={() => setSelectedDayIndex(idx)}
+                    className="flex-1 text-left cursor-pointer"
+                  >
+                    <span className="font-extrabold text-xs text-zinc-800 dark:text-zinc-200 block">{day.name}</span>
+                    {day.exercises?.length > 0 ? (
+                      <span className="text-[10px] text-zinc-400 block mt-0.5">{day.exercises.length} exercícios</span>
+                    ) : (
+                      <span className="text-[10px] text-zinc-400 italic block mt-0.5">Sem exercícios</span>
+                    )}
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    {/* Botão rápido "Treinar Hoje" se não estiver editando */}
+                    {!isEditingBasePlan ? (
                       <button
-                        onClick={handleStartWorkout}
-                        className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-extrabold shadow-sm transition-all"
+                        onClick={() => onWorkoutCheckIn(day.name)}
+                        className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black tracking-wide flex items-center gap-1 shadow-sm cursor-pointer"
+                        title="Fiz este treino hoje"
                       >
-                        <Play className="w-3.5 h-3.5" /> Iniciar Treino
+                        <Check className="w-3 h-3" />
+                        Treinei
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleDeleteDay(day.id)}
+                        className="p-1 text-rose-500 hover:bg-rose-500/10 rounded-lg cursor-pointer"
+                        title="Deletar Ficha"
+                      >
+                        <Trash className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleCancelWorkout}
-                      className="text-xs border border-rose-200 dark:border-rose-900/30 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-500 px-3 py-2 rounded-xl font-bold transition-all"
-                    >
-                      Cancelar Sessão
-                    </button>
-                    <button
-                      onClick={handleFinishWorkout}
-                      className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-extrabold shadow-sm transition-all"
-                    >
-                      <Check className="w-3.5 h-3.5" /> Finalizar Treino
-                    </button>
-                  </div>
-                )}
+                </div>
               </div>
+            ))}
 
-              {/* Lista de Exercícios */}
-              {activeDay.exercises.length > 0 ? (
-                <div className="space-y-4">
-                  {activeDay.exercises.map((ex, exIdx) => (
-                    <div 
-                      key={exIdx}
-                      className="border border-zinc-100 dark:border-zinc-800 rounded-xl p-4 bg-zinc-50/50 dark:bg-zinc-900/10 space-y-4 hover:shadow-sm transition-all"
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="flex items-start gap-3">
-                          <div className="p-2 bg-blue-50 dark:bg-blue-950/30 text-blue-500 rounded-lg shrink-0 mt-0.5">
-                            <Dumbbell className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-zinc-900 dark:text-zinc-100">{ex.name}</h4>
-                            <span className="text-xs text-zinc-400 font-semibold uppercase tracking-wider block mt-0.5">
-                              {ex.sets} séries × {ex.reps} repetições | Descanso: {ex.rest}s
-                            </span>
-                          </div>
-                        </div>
-                        {!isExecuting && (
-                          <button
-                            onClick={() => handleDeleteExercise(exIdx)}
-                            className="p-1.5 text-zinc-400 hover:text-rose-500 rounded-lg transition-all"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Configuração de Carga ou Caixa de Marcação */}
-                      <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-zinc-100 dark:border-zinc-800/50">
-                        {/* Ajuste de Carga */}
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-zinc-500">Carga Utilizada:</span>
-                          <div className="relative w-24">
-                            <input
-                              type="number"
-                              placeholder="0"
-                              disabled={isExecuting}
-                              value={exerciseWeights[exIdx] !== undefined ? exerciseWeights[exIdx] : ''}
-                              onChange={(e) => handleWeightChange(exIdx, e.target.value)}
-                              className="w-full text-xs font-semibold font-mono bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                            />
-                            <span className="absolute right-2 top-2 text-[10px] text-zinc-400">kg</span>
-                          </div>
-                        </div>
-
-                        {/* Visualização e Checklist de Sets no modo Execução */}
-                        {isExecuting ? (
-                          <div className="flex flex-wrap gap-1.5">
-                            {Array.from({ length: ex.sets }).map((_, setIdx) => {
-                              const isSetDone = completedSets[`${exIdx}-${setIdx}`];
-                              return (
-                                <button
-                                  key={setIdx}
-                                  onClick={() => toggleSetComplete(exIdx, setIdx, ex.rest)}
-                                  className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold border transition-all ${
-                                    isSetDone
-                                      ? 'bg-emerald-500 border-emerald-500 text-white'
-                                      : 'border-zinc-200 dark:border-zinc-800 hover:border-blue-500 text-zinc-600 dark:text-zinc-400 bg-white dark:bg-zinc-950'
-                                  }`}
-                                >
-                                  {isSetDone ? <Check className="w-3.5 h-3.5" /> : setIdx + 1}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <div className="flex gap-1">
-                            {Array.from({ length: ex.sets }).map((_, setIdx) => (
-                              <span 
-                                key={setIdx}
-                                className="w-5 h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-800"
-                              ></span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-12 text-zinc-400 space-y-2">
-                  <p className="text-sm">Nenhum exercício cadastrado para este dia de treino.</p>
-                  {!isExecuting && (
-                    <button
-                      onClick={() => setShowAddExerciseModal(true)}
-                      className="bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 text-xs font-bold px-3 py-2 rounded-xl border"
-                    >
-                      Adicionar Primeiro Exercício
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Botão de Adição no Rodapé do Bloco de Exercícios */}
-              {!isExecuting && (
+            {isEditingBasePlan && (
+              <div className="pt-2 border-t border-zinc-100 dark:border-zinc-850 flex gap-2">
                 <button
-                  onClick={() => setShowAddExerciseModal(true)}
-                  className="w-full flex items-center justify-center gap-1.5 border border-dashed border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-sm font-semibold text-zinc-500 rounded-xl py-3 mt-4 transition-all"
+                  onClick={handleCreateNewDay}
+                  className="flex-1 py-2 text-center text-xs font-bold text-indigo-500 border border-indigo-500/30 hover:bg-indigo-500/5 rounded-xl transition-all cursor-pointer"
                 >
-                  <PlusCircle className="w-4 h-4 text-blue-500" /> Adicionar Exercício
+                  + Nova Ficha
                 </button>
-              )}
-            </div>
-          </div>
-
-          {/* Dicas e Progresso Lateral */}
-          <div className="space-y-6">
-            
-            {/* Card informativo de execução */}
-            {isExecuting && (
-              <div className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white rounded-2xl p-6 shadow-md space-y-4">
-                <h3 className="text-lg font-bold flex items-center gap-2">
-                  <Timer className="w-5 h-5 animate-pulse" />
-                  Sessão em Andamento
-                </h3>
-                <p className="text-xs text-blue-100 leading-relaxed">
-                  Basta clicar no número correspondente à série ao concluí-la. Um timer de descanso começará para te guiar na recuperação.
-                </p>
-                <div className="border-t border-blue-400/30 pt-3 flex justify-between text-xs">
-                  <span>Séries concluídas:</span>
-                  <span className="font-mono font-bold">
-                    {Object.values(completedSets).filter(Boolean).length} totais
-                  </span>
-                </div>
+                <button
+                  onClick={() => handlePresetSelect('push-pull-legs')}
+                  className="py-2 px-3 text-center text-xs font-bold text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl transition-all cursor-pointer"
+                >
+                  ABC
+                </button>
               </div>
             )}
-
-            {/* Dica da IA para Treinos */}
-            <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm space-y-3">
-              <h3 className="text-md font-bold text-zinc-950 dark:text-zinc-50 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-blue-500" />
-                Dica de Carga (Progressão)
-              </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                Tente anotar suas cargas em cada treino. A progressão de carga (aumentar levemente o peso ou as repetições ao longo das semanas) é o fator mais importante para a hipertrofia e manutenção muscular.
-              </p>
-              <div className="p-3 bg-zinc-50 dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800/80 rounded-xl flex gap-3 text-[11px] text-zinc-500 leading-relaxed">
-                <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
-                <span>O timer de descanso ideal é de 60 a 90 segundos para isoladores, e de 90 a 120 segundos para multiarticulares pesados.</span>
-              </div>
-            </div>
           </div>
-        </div>
-      )}
 
-      {/* MODAL PARA ADICIONAR EXERCÍCIO */}
-      {showAddExerciseModal && (
-        <div className="fixed inset-0 bg-zinc-950/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl w-full max-w-xl p-6 flex flex-col max-h-[85vh]">
-            
-            {/* Título & Fechar */}
-            <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-3 mb-4">
-              <h3 className="text-lg font-bold text-zinc-950 dark:text-zinc-50">Adicionar Exercício</h3>
-              <button 
-                onClick={() => setShowAddExerciseModal(false)}
-                className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Inputs de Série e Repetição antes */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 bg-zinc-50 dark:bg-zinc-900/50 p-3 rounded-xl border border-zinc-100 dark:border-zinc-800/80">
-              <div>
-                <label className="block text-[10px] font-bold text-zinc-400 uppercase">Séries</label>
-                <input 
-                  type="number"
-                  value={newExerciseForm.sets}
-                  onChange={(e) => setNewExerciseForm(prev => ({ ...prev, sets: parseInt(e.target.value) }))}
-                  className="w-full mt-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-1.5 text-xs text-zinc-900 dark:text-zinc-100"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-zinc-400 uppercase">Reps</label>
-                <input 
-                  type="text"
-                  value={newExerciseForm.reps}
-                  onChange={(e) => setNewExerciseForm(prev => ({ ...prev, reps: e.target.value }))}
-                  className="w-full mt-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-1.5 text-xs text-zinc-900 dark:text-zinc-100"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-zinc-400 uppercase">Descanso (s)</label>
-                <input 
-                  type="number"
-                  value={newExerciseForm.rest}
-                  onChange={(e) => setNewExerciseForm(prev => ({ ...prev, rest: parseInt(e.target.value) }))}
-                  className="w-full mt-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-1.5 text-xs text-zinc-900 dark:text-zinc-100"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-zinc-400 uppercase">Carga (kg)</label>
-                <input 
-                  type="number"
-                  value={newExerciseForm.weight}
-                  onChange={(e) => setNewExerciseForm(prev => ({ ...prev, weight: parseFloat(e.target.value) }))}
-                  className="w-full mt-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-1.5 text-xs text-zinc-900 dark:text-zinc-100"
-                />
-              </div>
-            </div>
-
-            {/* Criar exercício personalizado rápido se não achar */}
-            <div className="flex gap-2 mb-3">
-              <input
-                type="text"
-                placeholder="Pesquisar exercício na biblioteca..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100"
-              />
-            </div>
-
-            {/* Lista dos Exercícios na Base para Escolha */}
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1 border border-zinc-100 dark:border-zinc-800/80 rounded-xl p-2 bg-zinc-50/20 dark:bg-zinc-950/20">
-              {filteredExercises.length > 0 ? (
-                filteredExercises.map((ex, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => handleAddExercise(ex)}
-                    className="w-full text-left p-3 border border-zinc-100 dark:border-zinc-800 hover:border-blue-500 rounded-xl flex justify-between items-center bg-white dark:bg-zinc-900 transition-all"
-                  >
+          {/* Visualização de exercícios da Ficha selecionada */}
+          {workout?.days?.[selectedDayIndex] && (
+            <div className="border-t border-zinc-100 dark:border-zinc-850 pt-4 space-y-4">
+              <span className="text-[10px] font-black text-zinc-400 uppercase tracking-wider block">
+                Exercícios Planejados: {workout.days[selectedDayIndex].name}
+              </span>
+              
+              <div className="space-y-2.5">
+                {workout.days[selectedDayIndex].exercises?.map((ex, exIdx) => (
+                  <div key={ex.id} className="p-3 bg-zinc-50 dark:bg-zinc-900/40 rounded-xl border border-zinc-100/50 dark:border-zinc-900 flex justify-between items-center">
                     <div>
-                      <span className="font-bold text-xs text-zinc-900 dark:text-zinc-100 block">{ex.name}</span>
-                      <span className="text-[10px] text-zinc-400 font-bold uppercase mt-0.5 block">{ex.category}</span>
+                      <span className="font-bold text-xs text-zinc-800 dark:text-zinc-200 block">{ex.name}</span>
+                      <span className="text-[10px] text-zinc-400 font-mono">
+                        {ex.sets} séries • {ex.reps} reps • {ex.rest}s descanso
+                      </span>
                     </div>
-                    <span className="text-xs text-blue-500 font-bold">+ Selecionar</span>
-                  </button>
-                ))
-              ) : (
-                <div className="text-center py-6 text-xs text-zinc-400 space-y-3">
-                  <p>Nenhum exercício encontrado com "{searchQuery}".</p>
-                  <div className="border-t border-zinc-100 dark:border-zinc-800/80 pt-3 space-y-2 text-left">
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide">Criar Exercício Customizado</span>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="Nome do novo exercício..."
-                        value={newExerciseForm.name}
-                        onChange={(e) => setNewExerciseForm(prev => ({ ...prev, name: e.target.value }))}
-                        className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs"
-                      />
-                      <button
-                        onClick={handleCreateCustomExercise}
-                        className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg"
-                      >
-                        Criar
-                      </button>
+
+                    <div className="flex items-center gap-2">
+                      {isEditingBasePlan ? (
+                        <button
+                          onClick={() => handleDeleteExercise(exIdx)}
+                          className="p-1.5 text-zinc-400 hover:text-rose-500 rounded-lg cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      ) : (
+                        <span className="text-[10px] font-mono font-bold bg-zinc-200/80 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 px-2 py-0.5 rounded">
+                          {ex.weight} kg
+                        </span>
+                      )}
                     </div>
                   </div>
+                ))}
+
+                {isEditingBasePlan && (
+                  <button
+                    onClick={() => setShowAddExerciseModal(true)}
+                    className="w-full py-2 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    Adicionar Exercício
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* BODY (DIREITA - 2/3): DIÁRIO DE TREINOS DO DIA ATIVO */}
+        <div className="lg:col-span-2 bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center border-b border-zinc-100 dark:border-zinc-800 pb-4 gap-3.5">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black uppercase tracking-wider text-indigo-500">Diário de Atividade</span>
+                <span className={`px-2 py-0.5 rounded-md font-mono text-[10px] font-bold ${
+                  loggedWorkoutName 
+                    ? loggedWorkoutName === 'Descanso' ? 'bg-amber-500/10 text-amber-500' : 'bg-emerald-500/10 text-emerald-500'
+                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'
+                }`}>
+                  {loggedWorkoutName ? loggedWorkoutName : 'Sem treino registrado'}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                {lang === 'pt' ? 'Gerencie o que você treinou e acompanhe a execução.' : 'Log training check-in for specific dates.'}
+              </p>
+            </div>
+
+            {/* Seletor de Data */}
+            <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-150 dark:border-zinc-800 rounded-2xl p-1 shadow-sm self-start">
+              <button onClick={handlePrevDay} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500">
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <div className="px-2 text-xs font-extrabold text-zinc-700 dark:text-zinc-300 min-w-[100px] text-center flex items-center justify-center gap-1">
+                <Calendar className="w-3 h-3 text-indigo-500" />
+                <span>{formatDateDisplay(activeDate)}</span>
+              </div>
+              <button onClick={handleNextDay} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500">
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Casos do Diário: */}
+          {!loggedWorkoutName ? (
+            /* CASO 1: SEM CHECK-IN */
+            <div className="text-center py-12 space-y-6">
+              <div className="space-y-2">
+                <Dumbbell className="w-12 h-12 text-zinc-300 mx-auto" />
+                <h4 className="text-sm font-bold text-zinc-800 dark:text-zinc-200">
+                  {lang === 'pt' ? 'O que você treinou hoje?' : 'What did you train today?'}
+                </h4>
+                <p className="text-xs text-zinc-400 max-w-[320px] mx-auto">
+                  Marque sua ficha planejada, registre um cardio livre ou registre o descanso para recuperar o corpo.
+                </p>
+              </div>
+
+              {/* Opções de Check-in */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-w-[600px] mx-auto">
+                {workout?.days?.map((day) => (
+                  <button
+                    key={day.id}
+                    onClick={() => onWorkoutCheckIn(day.name)}
+                    className="p-4 bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-900/40 dark:hover:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-extrabold text-zinc-800 dark:text-zinc-200 transition-all cursor-pointer flex flex-col items-center gap-1"
+                  >
+                    <span>💪 {day.name}</span>
+                    <span className="text-[9px] text-zinc-400 font-bold font-mono">{day.exercises?.length || 0} EXERCÍCIOS</span>
+                  </button>
+                ))}
+                
+                <button
+                  onClick={() => onWorkoutCheckIn('Cardio')}
+                  className="p-4 bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-900/40 dark:hover:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-extrabold text-zinc-800 dark:text-zinc-200 transition-all cursor-pointer flex flex-col items-center gap-1"
+                >
+                  <span>🏃 Cardio Livre</span>
+                  <span className="text-[9px] text-zinc-400 font-bold font-mono">CORRIDA / BIKE</span>
+                </button>
+
+                <button
+                  onClick={() => onWorkoutCheckIn('Descanso')}
+                  className="p-4 bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-900/40 dark:hover:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-extrabold text-zinc-800 dark:text-zinc-200 transition-all cursor-pointer flex flex-col items-center gap-1"
+                >
+                  <span>🛌 Descanso / Off</span>
+                  <span className="text-[9px] text-zinc-400 font-bold font-mono">RECUPERAÇÃO</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* CASO 2: COM CHECK-IN REALIZADO */
+            <div className="space-y-6">
+              <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-[#121216] border border-zinc-150 dark:border-zinc-800 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">
+                    {loggedWorkoutName === 'Descanso' ? '🛌' : loggedWorkoutName === 'Cardio' ? '🏃' : '🏆'}
+                  </span>
+                  <div>
+                    <span className="font-extrabold text-sm text-zinc-900 dark:text-zinc-50 block">
+                      {loggedWorkoutName === 'Descanso' 
+                        ? 'Dia de Descanso Registrado' 
+                        : loggedWorkoutName === 'Cardio' 
+                        ? 'Sessão de Cardio Livre Concluída' 
+                        : `Treino Realizado: ${loggedWorkoutName}`}
+                    </span>
+                    <span className="text-[10px] text-zinc-400 font-bold block mt-0.5">
+                      Check-in ativo para o dia {formatDateDisplay(activeDate)}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => onWorkoutCheckIn(null)}
+                  className="text-xs font-bold text-rose-500 hover:text-rose-600 bg-rose-500/5 hover:bg-rose-500/10 px-3.5 py-2 rounded-xl transition-all cursor-pointer"
+                >
+                  Desmarcar Treino
+                </button>
+              </div>
+
+              {/* Se o treino for uma Ficha de Treino padrão: Mostra a listagem de execução com Timer de descanso */}
+              {loggedFicha ? (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-2">
+                    <span className="text-[10px] font-black text-indigo-500 uppercase tracking-wider block">
+                      Ficha e Cargas do Treino Realizado
+                    </span>
+                    
+                    {/* Timer no Header */}
+                    {timerActive && (
+                      <div className="flex items-center gap-1.5 bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 px-3 py-1 rounded-xl font-mono text-xs font-bold animate-pulse">
+                        <Timer className="w-3.5 h-3.5" />
+                        <span>Resting: {timerSecondsLeft}s</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-4">
+                    {loggedFicha.exercises?.map((ex, exIdx) => (
+                      <div key={ex.id} className="p-4 bg-zinc-50/50 dark:bg-[#121216]/50 border border-zinc-100 dark:border-zinc-900 rounded-2xl space-y-3.5">
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <span className="font-extrabold text-xs text-zinc-900 dark:text-zinc-50 block">{ex.name}</span>
+                            <span className="text-[10px] text-zinc-400 font-semibold font-mono">
+                              {ex.sets} séries • {ex.reps} reps • {ex.rest}s descanso
+                            </span>
+                          </div>
+
+                          {/* Ajuste de Carga de Peso no Diário */}
+                          <div className="flex items-center gap-1.5">
+                            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide">Carga (kg):</label>
+                            <input
+                              type="number"
+                              defaultValue={ex.weight}
+                              onBlur={(e) => handleWeightChange(ex, e.target.value)}
+                              className="w-16 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-0.5 font-mono text-xs font-bold text-center text-zinc-800 dark:text-zinc-200"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Checklist de Séries Concluídas (Interativo) */}
+                        <div className="flex flex-wrap gap-2 pt-2 border-t border-dashed border-zinc-200 dark:border-zinc-900">
+                          {Array.from({ length: ex.sets }).map((_, setIdx) => {
+                            const isDone = completedSets[`${exIdx}-${setIdx}`];
+                            return (
+                              <button
+                                key={setIdx}
+                                onClick={() => toggleSetComplete(exIdx, setIdx, ex.rest)}
+                                className={`px-3 py-1.5 rounded-lg text-[10px] font-black tracking-wide transition-all cursor-pointer border ${
+                                  isDone 
+                                    ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' 
+                                    : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:border-zinc-300 dark:hover:border-zinc-700'
+                                }`}
+                              >
+                                {isDone ? '✓ ' : ''}SÉRIE {setIdx + 1}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : loggedWorkoutName === 'Cardio' ? (
+                <div className="p-6 text-center border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-2xl text-zinc-400 text-xs py-10 space-y-2">
+                  <Play className="w-10 h-10 text-indigo-500 mx-auto opacity-75" />
+                  <p className="font-bold text-zinc-700 dark:text-zinc-300">Corrida, natação ou bike realizados hoje.</p>
+                  <p className="max-w-[280px] mx-auto text-[10px]">Utilize para fins de déficit calórico. Ótima escolha para manter o condicionamento cardiovascular em dia!</p>
+                </div>
+              ) : (
+                <div className="p-6 text-center border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-2xl text-zinc-400 text-xs py-10 space-y-2">
+                  <Sparkles className="w-10 h-10 text-amber-500 mx-auto opacity-75" />
+                  <p className="font-bold text-zinc-700 dark:text-zinc-300">Dia focado na recuperação muscular total.</p>
+                  <p className="max-w-[280px] mx-auto text-[10px]">Aproveite para dormir bem, alongar-se, e manter a hidratação alta para que os músculos possam se reconstruir mais fortes!</p>
                 </div>
               )}
             </div>
+          )}
+        </div>
+      </div>
 
-            <div className="border-t border-zinc-100 dark:border-zinc-800 mt-4 pt-3 flex justify-end">
-              <button
+      {/* ==========================================
+          MODAL DE ADIÇÃO DE EXERCÍCIOS (PLAN BASE)
+          ========================================== */}
+      {showAddExerciseModal && workout?.days?.[selectedDayIndex] && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#121215] border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 w-full max-w-xl max-h-[85vh] overflow-y-auto space-y-6 shadow-xl">
+            <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-3">
+              <h3 className="font-extrabold text-md text-zinc-950 dark:text-zinc-50 flex items-center gap-1.5">
+                <PlusCircle className="w-5 h-5 text-indigo-500" />
+                {lang === 'pt' ? `Adicionar Exercício ao ${workout.days[selectedDayIndex].name}` : `Add exercise`}
+              </h3>
+              <button 
                 onClick={() => setShowAddExerciseModal(false)}
-                className="text-xs font-bold text-zinc-500 hover:text-zinc-700 px-4 py-2"
+                className="text-sm font-bold text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
               >
-                Cancelar
+                Fechar
               </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Biblioteca de exercícios */}
+              <div className="space-y-4">
+                <span className="text-xs font-bold text-zinc-400 uppercase tracking-wide block">Escolher da Biblioteca</span>
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 w-4 h-4 text-zinc-400" />
+                  <input
+                    type="text"
+                    placeholder="Buscar supino, agachamento..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-9 pr-4 py-2 text-xs focus:outline-none"
+                  />
+                </div>
+
+                <div className="border border-zinc-100 dark:border-zinc-800 rounded-xl divide-y divide-zinc-100 dark:divide-zinc-800 max-h-[220px] overflow-y-auto">
+                  {exercisesDatabase
+                    .filter(ex => ex.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                    .slice(0, 15)
+                    .map(ex => (
+                      <button
+                        key={ex.name}
+                        onClick={() => handleAddExercise(ex)}
+                        className="w-full text-left p-2.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300 flex justify-between items-center"
+                      >
+                        <span className="font-bold">{ex.name}</span>
+                        <span className="text-[9px] bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded font-bold">{ex.category}</span>
+                      </button>
+                    ))}
+                </div>
+              </div>
+
+              {/* Formulário personalizado */}
+              <div className="space-y-4 border-t md:border-t-0 md:border-l border-zinc-100 dark:border-zinc-800 pt-4 md:pt-0 md:pl-6">
+                <span className="text-xs font-bold text-zinc-400 uppercase tracking-wide block">Configurar Séries & Repetições</span>
+                <div className="space-y-3.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Séries (sets)</label>
+                      <input
+                        type="number"
+                        value={newExerciseForm.sets}
+                        onChange={(e) => setNewExerciseForm({ ...newExerciseForm, sets: Number(e.target.value) })}
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-mono focus:outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Repetições</label>
+                      <input
+                        type="text"
+                        value={newExerciseForm.reps}
+                        onChange={(e) => setNewExerciseForm({ ...newExerciseForm, reps: e.target.value })}
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-mono focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Descanso (s)</label>
+                      <input
+                        type="number"
+                        value={newExerciseForm.rest}
+                        onChange={(e) => setNewExerciseForm({ ...newExerciseForm, rest: Number(e.target.value) })}
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-mono focus:outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Peso Inicial (kg)</label>
+                      <input
+                        type="number"
+                        value={newExerciseForm.weight}
+                        onChange={(e) => setNewExerciseForm({ ...newExerciseForm, weight: Number(e.target.value) })}
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-mono focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-zinc-400 italic">
+                    Dica: Para concluir a inserção rápida, basta clicar em qualquer exercício da biblioteca na lista ao lado com as séries já configuradas acima!
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 }
