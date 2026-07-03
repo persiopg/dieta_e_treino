@@ -52,6 +52,11 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [weightModalVisible, setWeightModalVisible] = useState(false);
   const [newWeight, setNewWeight] = useState('');
+  
+  // Estados para Modal de edição de quantidade
+  const [quantityModalVisible, setQuantityModalVisible] = useState(false);
+  const [editingLogItem, setEditingLogItem] = useState<any>(null);
+  const [editingQuantity, setEditingQuantity] = useState('');
 
   const getLocalDateString = (d = new Date()) => {
     const year = d.getFullYear();
@@ -284,6 +289,43 @@ export default function DashboardScreen() {
     }
   };
 
+  // Abrir modal de alteração de quantidade do alimento
+  const handleEditQuantityPress = (item: any) => {
+    setEditingLogItem(item);
+    setEditingQuantity(Math.round(item.quantity).toString());
+    setQuantityModalVisible(true);
+  };
+
+  // Atualizar quantidade do alimento digitada no Modal
+  const handleQuantityUpdate = async () => {
+    const qtyNum = Number(editingQuantity);
+    if (isNaN(qtyNum) || qtyNum <= 0 || !editingLogItem) {
+      Alert.alert('Erro', 'Por favor, digite uma quantidade válida.');
+      return;
+    }
+
+    const ratio = qtyNum / editingLogItem.quantity;
+
+    try {
+      await api.put(`/api/tracker/diet/${editingLogItem.id}`, {
+        quantity: qtyNum,
+        protein: editingLogItem.protein * ratio,
+        carbs: editingLogItem.carbs * ratio,
+        fat: editingLogItem.fat * ratio,
+        calories: editingLogItem.calories * ratio
+      });
+
+      setQuantityModalVisible(false);
+      setEditingLogItem(null);
+      setEditingQuantity('');
+      fetchDashboardData(true, activeDate);
+      Alert.alert('Sucesso', 'Quantidade atualizada.');
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erro', 'Não foi possível atualizar a quantidade.');
+    }
+  };
+
   // Buscar alimentos para substituição no app móvel
   useEffect(() => {
     if (substituteSearchTerm.trim() === '') {
@@ -511,10 +553,10 @@ export default function DashboardScreen() {
                 <Text style={styles.mealSectionTitle}>{mealName}</Text>
                 {logs.map((item: any) => (
                   <View key={item.id} style={styles.mealItemRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.mealItemName}>{item.food_name}</Text>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={styles.mealItemName} numberOfLines={1} ellipsizeMode="tail">{item.food_name}</Text>
                       <Text style={styles.mealItemSub}>
-                        {item.quantity}g • P: {Math.round(item.protein)}g C: {Math.round(item.carbs)}g G: {Math.round(item.fat)}g
+                        P: {Math.round(item.protein)}g • C: {Math.round(item.carbs)}g • G: {Math.round(item.fat)}g
                       </Text>
                     </View>
                     <View style={styles.mealItemActions}>
@@ -524,6 +566,14 @@ export default function DashboardScreen() {
                       <View style={styles.qtyControl}>
                         <TouchableOpacity style={styles.qtyBtn} onPress={() => handleAdjustLogQuantity(item, 'decrement')}>
                           <Text style={styles.qtyBtnText}>-</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                          style={[styles.qtyBtn, { borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#3f3f46', paddingHorizontal: 6 }]} 
+                          onPress={() => handleEditQuantityPress(item)}
+                        >
+                          <Text style={[styles.qtyBtnText, { color: '#ffffff', fontSize: 10 }]}>
+                            {Math.round(item.quantity)}g
+                          </Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={styles.qtyBtn} onPress={() => handleAdjustLogQuantity(item, 'increment')}>
                           <Text style={styles.qtyBtnText}>+</Text>
@@ -666,6 +716,41 @@ export default function DashboardScreen() {
                 <Text style={styles.modalBtnText}>{lang === 'pt' ? 'Cancelar' : 'Cancel'}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.modalSaveBtn} onPress={handleWeightUpdate}>
+                <Text style={styles.modalBtnText}>{translations[lang].save}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal para atualizar a quantidade de um alimento */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={quantityModalVisible}
+        onRequestClose={() => setQuantityModalVisible(false)}
+      >
+        <View style={styles.modalBg}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Alterar Quantidade</Text>
+            {editingLogItem && (
+              <Text style={styles.modalSubTitle}>
+                Digite a nova quantidade para "{editingLogItem.food_name}" (em gramas):
+              </Text>
+            )}
+            <TextInput
+              style={styles.modalInput}
+              keyboardType="numeric"
+              placeholder="Ex: 160"
+              placeholderTextColor="#71717a"
+              value={editingQuantity}
+              onChangeText={setEditingQuantity}
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setQuantityModalVisible(false)}>
+                <Text style={styles.modalBtnText}>{lang === 'pt' ? 'Cancelar' : 'Cancel'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSaveBtn} onPress={handleQuantityUpdate}>
                 <Text style={styles.modalBtnText}>{translations[lang].save}</Text>
               </TouchableOpacity>
             </View>

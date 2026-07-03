@@ -5,24 +5,24 @@ import {
   Droplet, 
   Flame, 
   Dumbbell, 
-  Calendar, 
-  Plus, 
+  Apple, 
   RotateCcw,
-  Sparkles,
-  TrendingUp,
-  Apple,
   CheckCircle,
-  HelpCircle,
-  TrendingDown,
-  Scale,
-  ChevronLeft,
-  ChevronRight,
+  Plus,
   Trash2,
   PlusCircle,
   Search,
   Check,
   Info,
-  RefreshCw
+  RefreshCw,
+  Scale,
+  HelpCircle,
+  Calendar,
+  TrendingUp,
+  TrendingDown,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles
 } from 'lucide-react';
 import { initialFoodDatabase } from '../data/foodDatabase';
 
@@ -65,6 +65,10 @@ export default function Dashboard({
   
   // Estado local de treino concluído no dia (nome do treino concluído)
   const [loggedWorkoutName, setLoggedWorkoutName] = useState(null);
+
+  // Estado local para Modal de edição de quantidade
+  const [editingLogItem, setEditingLogItem] = useState(null);
+  const [editingQuantity, setEditingQuantity] = useState('');
 
   // Fallback se o perfil não estiver configurado
   useEffect(() => {
@@ -321,6 +325,45 @@ export default function Dashboard({
         calories: logItem.calories * ratio
       });
       onRefreshData();
+    } catch (err) {
+      console.error('Erro ao ajustar quantidade do alimento:', err);
+    }
+  };
+
+  // Abrir Modal de edição de quantidade
+  const handleEditLogQuantityDirectly = (logItem) => {
+    setEditingLogItem(logItem);
+    setEditingQuantity(Math.round(logItem.quantity).toString());
+  };
+
+  // Salvar a nova quantidade digitada no Modal
+  const handleSaveQuantityModal = async (e) => {
+    if (e) e.preventDefault();
+    if (!editingLogItem) return;
+    
+    const newQty = Number(editingQuantity);
+    if (isNaN(newQty) || newQty <= 0) {
+      alert(
+        lang === 'pt' 
+          ? 'Por favor, insira um número válido maior que 0.' 
+          : 'Please enter a valid number greater than 0.'
+      );
+      return;
+    }
+    
+    const ratio = newQty / editingLogItem.quantity;
+    
+    try {
+      await axios.put(`/api/tracker/diet/${editingLogItem.id}`, {
+        food_name: editingLogItem.food_name,
+        quantity: newQty,
+        protein: editingLogItem.protein * ratio,
+        carbs: editingLogItem.carbs * ratio,
+        fat: editingLogItem.fat * ratio,
+        calories: editingLogItem.calories * ratio
+      });
+      onRefreshData();
+      setEditingLogItem(null);
     } catch (err) {
       console.error('Erro ao ajustar quantidade do alimento:', err);
     }
@@ -741,129 +784,7 @@ export default function Dashboard({
             </div>
           )}
 
-          {/* Seletor de Equivalência de Alimento (Substituição Inteligente) */}
-          {substitutingItem && (
-            <div className="p-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4" />
-                  {lang === 'pt' ? `Substituir ${substitutingItem.food_name}` : `Replace ${substitutingItem.food_name}`}
-                </span>
-                <button 
-                  onClick={() => { setSubstitutingItem(null); setSelectedSubstituteFood(null); setSubstituteSearchTerm(''); }}
-                  className="text-xs font-bold text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
-                >
-                  {lang === 'pt' ? 'Cancelar' : 'Cancel'}
-                </button>
-              </div>
 
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                {lang === 'pt' 
-                  ? `Selecione um novo alimento para substituir as ${Math.round(substitutingItem.calories)} kcal de ${substitutingItem.quantity}g de ${substitutingItem.food_name}.`
-                  : `Select a new food to replace the ${Math.round(substitutingItem.calories)} kcal of ${substitutingItem.quantity}g of ${substitutingItem.food_name}.`}
-              </p>
-
-              <form onSubmit={handleReplaceFoodWithEquivalent} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                  {/* Busca */}
-                  <div className="md:col-span-2 space-y-1.5 relative">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">
-                      {lang === 'pt' ? 'Buscar Novo Alimento' : 'Search New Food'}
-                    </label>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-3.5 w-4 h-4 text-zinc-400" />
-                      <input
-                        type="text"
-                        placeholder={lang === 'pt' ? "Substituir por aveia, batata, filé..." : "Substitute with potatoes, steak..."}
-                        value={substituteSearchTerm}
-                        onChange={(e) => setSubstituteSearchTerm(e.target.value)}
-                        className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      />
-                    </div>
-
-                    {/* Resultados da busca */}
-                    {substituteSearchResults.length > 0 && (
-                      <div className="absolute z-20 bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg mt-1 w-full max-w-[400px] overflow-hidden">
-                        {substituteSearchResults.map((food) => (
-                          <button
-                            key={food.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedSubstituteFood(food);
-                              setSubstituteSearchTerm(food.name);
-                              setSubstituteSearchResults([]);
-                            }}
-                            className="w-full text-left px-4 py-2.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-800 dark:text-zinc-200 border-b border-zinc-100 dark:border-zinc-900 last:border-0 block"
-                          >
-                            <span className="font-bold">{food.name}</span>
-                            <span className="text-[10px] text-zinc-400 block mt-0.5">{food.calories} kcal / 100g (P: {food.protein}g C: {food.carbs}g G: {food.fat}g)</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={!selectedSubstituteFood}
-                    className="w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold text-xs rounded-xl shadow-sm transition-all h-[42px] cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <Check className="w-4 h-4" />
-                    {lang === 'pt' ? 'Confirmar Substituição' : 'Confirm Swap'}
-                  </button>
-                </div>
-
-                {/* Exibição do cálculo de equivalência */}
-                {selectedSubstituteFood && (() => {
-                  const originalCalories = substitutingItem.calories;
-                  const newFoodCal100g = selectedSubstituteFood.calories;
-                  const equivalentQuantity = Math.round((originalCalories * 100) / newFoodCal100g);
-                  const ratio = equivalentQuantity / 100;
-                  
-                  return (
-                    <div className="p-3.5 bg-zinc-950 border border-zinc-850 rounded-xl space-y-3">
-                      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-                        <span className="text-xs text-zinc-300">
-                          {lang === 'pt' ? 'Equivalente calculado:' : 'Calculated equivalent:'}{' '}
-                          <strong className="text-indigo-400 text-sm font-extrabold">
-                            {equivalentQuantity}g de {selectedSubstituteFood.name}
-                          </strong>
-                        </span>
-                        <span className="text-[10px] font-mono bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded-md font-bold self-start">
-                          {Math.round(originalCalories)} kcal (Mantido)
-                        </span>
-                      </div>
-
-                      {/* Comparativo de macros */}
-                      <div className="grid grid-cols-3 gap-2 text-[10px] border-t border-zinc-800/80 pt-2.5">
-                        <div className="space-y-0.5">
-                          <span className="text-zinc-500 font-bold uppercase">{translations[lang].protein}</span>
-                          <span className="block text-zinc-200 font-mono">
-                            {Math.round(substitutingItem.protein)}g →{' '}
-                            <span className="text-rose-500 font-bold">{Math.round(selectedSubstituteFood.protein * ratio)}g</span>
-                          </span>
-                        </div>
-                        <div className="space-y-0.5">
-                          <span className="text-zinc-500 font-bold uppercase">{translations[lang].carbs}</span>
-                          <span className="block text-zinc-200 font-mono">
-                            {Math.round(substitutingItem.carbs)}g →{' '}
-                            <span className="text-blue-500 font-bold">{Math.round(selectedSubstituteFood.carbs * ratio)}g</span>
-                          </span>
-                        </div>
-                        <div className="space-y-0.5">
-                          <span className="text-zinc-500 font-bold uppercase">{translations[lang].fat}</span>
-                          <span className="block text-zinc-200 font-mono">
-                            {Math.round(substitutingItem.fat)}g →{' '}
-                            <span className="text-amber-500 font-bold">{Math.round(selectedSubstituteFood.fat * ratio)}g</span>
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </form>
-            </div>
-          )}
 
           {/* Listagem das Refeições do Diário */}
           <div className="space-y-6">
@@ -919,9 +840,7 @@ export default function Dashboard({
                             <div key={item.id} className="flex justify-between items-start gap-4 pb-3 border-b border-zinc-100 dark:border-zinc-900 last:border-0 last:pb-0">
                               <div className="space-y-0.5">
                                 <span className="font-semibold text-xs text-zinc-800 dark:text-zinc-200">{item.food_name}</span>
-                                <div className="flex items-center gap-2 text-[10px] text-zinc-400">
-                                  <span>{item.quantity}g</span>
-                                  <span>•</span>
+                                <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-0.5">
                                   <span>P: {Math.round(item.protein)}g</span>
                                   <span>•</span>
                                   <span>C: {Math.round(item.carbs)}g</span>
@@ -937,14 +856,20 @@ export default function Dashboard({
                                 <div className="flex items-center border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-white dark:bg-zinc-900">
                                   <button
                                     onClick={() => handleAdjustLogQuantity(item, 'decrement')}
-                                    className="px-2 py-1 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-extrabold"
+                                    className="px-2.5 py-1 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-extrabold cursor-pointer"
                                   >
                                     -
                                   </button>
-                                  <span className="px-1 text-[10px] font-bold text-zinc-500 border-x border-zinc-100 dark:border-zinc-800">{lang === 'pt' ? 'Qtd' : 'Qty'}</span>
+                                  <button
+                                     onClick={() => handleEditLogQuantityDirectly(item)}
+                                     className="px-2.5 py-1 text-[10px] font-bold text-zinc-700 dark:text-zinc-300 border-x border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-500 transition-colors cursor-pointer"
+                                     title={lang === 'pt' ? 'Clique para alterar a quantidade' : 'Click to edit quantity'}
+                                   >
+                                     {Number(item.quantity).toFixed(0)}g
+                                   </button>
                                   <button
                                     onClick={() => handleAdjustLogQuantity(item, 'increment')}
-                                    className="px-2 py-1 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-extrabold"
+                                    className="px-2.5 py-1 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-extrabold cursor-pointer"
                                   >
                                     +
                                   </button>
@@ -1220,6 +1145,188 @@ export default function Dashboard({
 
         </div>
       </div>
+
+      {/* Modal Customizado para Edição de Quantidade (g) */}
+      {editingLogItem && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-sm shadow-xl space-y-4 animate-scale-up">
+            <div className="text-center space-y-2">
+              <h3 className="text-lg font-extrabold text-zinc-950 dark:text-zinc-50">
+                {lang === 'pt' ? 'Alterar Quantidade' : 'Edit Quantity'}
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                {lang === 'pt' 
+                  ? `Altere a quantidade consumida de "${editingLogItem.food_name}"` 
+                  : `Edit quantity consumed for "${editingLogItem.food_name}"`}
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveQuantityModal} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block text-center">
+                  {lang === 'pt' ? 'Quantidade em gramas (g)' : 'Quantity in grams (g)'}
+                </label>
+                <input
+                  type="number"
+                  required
+                  autoFocus
+                  placeholder="Ex: 160"
+                  value={editingQuantity}
+                  onChange={(e) => setEditingQuantity(e.target.value)}
+                  className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingLogItem(null)}
+                  className="flex-1 py-3 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl text-xs font-bold text-zinc-500 dark:text-zinc-400 transition-all cursor-pointer"
+                >
+                  {lang === 'pt' ? 'Cancelar' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-extrabold shadow-md transition-all cursor-pointer"
+                >
+                  {lang === 'pt' ? 'Salvar' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Customizado de Substituição Equivalente */}
+      {substitutingItem && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-md shadow-xl space-y-4 animate-scale-up">
+            <div className="text-center space-y-2">
+              <h3 className="text-lg font-extrabold text-indigo-650 dark:text-indigo-400 flex items-center justify-center gap-1.5">
+                <Sparkles className="w-5 h-5 text-indigo-500" />
+                {lang === 'pt' ? 'Substituição Equivalente' : 'Equivalent Swap'}
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                {lang === 'pt' 
+                  ? `Selecione um novo alimento para substituir as ${Math.round(substitutingItem.calories)} kcal de ${substitutingItem.quantity}g de "${substitutingItem.food_name}"` 
+                  : `Select a new food to replace the ${Math.round(substitutingItem.calories)} kcal of ${substitutingItem.quantity}g of "${substitutingItem.food_name}"`}
+              </p>
+            </div>
+
+            <form onSubmit={handleReplaceFoodWithEquivalent} className="space-y-4">
+              <div className="space-y-1.5 relative">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
+                  {lang === 'pt' ? 'Buscar Novo Alimento' : 'Search New Food'}
+                </label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-3.5 w-4 h-4 text-zinc-400" />
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    placeholder={lang === 'pt' ? "Substituir por aveia, batata, filé..." : "Substitute with potatoes, steak..."}
+                    value={substituteSearchTerm}
+                    onChange={(e) => setSubstituteSearchTerm(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+
+                {/* Resultados da busca */}
+                {substituteSearchResults.length > 0 && (
+                  <div className="absolute z-50 bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg mt-1 w-full overflow-hidden max-h-48 overflow-y-auto">
+                    {substituteSearchResults.map((food) => (
+                      <button
+                        key={food.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedSubstituteFood(food);
+                          setSubstituteSearchTerm(food.name);
+                          setSubstituteSearchResults([]);
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-800 dark:text-zinc-200 border-b border-zinc-100 dark:border-zinc-900 last:border-0 block cursor-pointer"
+                      >
+                        <span className="font-bold">{food.name}</span>
+                        <span className="text-[10px] text-zinc-400 block mt-0.5">{food.calories} kcal / 100g (P: {food.protein}g C: {food.carbs}g G: {food.fat}g)</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Exibição do cálculo de equivalência */}
+              {selectedSubstituteFood && (() => {
+                const originalCalories = substitutingItem.calories;
+                const newFoodCal100g = selectedSubstituteFood.calories;
+                const equivalentQuantity = Math.round((originalCalories * 100) / newFoodCal100g);
+                const ratio = equivalentQuantity / 100;
+                
+                return (
+                  <div className="p-3.5 bg-zinc-550 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl space-y-3">
+                    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                      <span className="text-xs text-zinc-650 dark:text-zinc-300">
+                        {lang === 'pt' ? 'Equivalente calculado:' : 'Calculated equivalent:'}{' '}
+                        <strong className="text-indigo-600 dark:text-indigo-400 text-sm font-extrabold block sm:inline">
+                          {equivalentQuantity}g de {selectedSubstituteFood.name}
+                        </strong>
+                      </span>
+                      <span className="text-[10px] font-mono bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 px-2 py-0.5 rounded-md font-bold self-start">
+                        {Math.round(originalCalories)} kcal (Mantido)
+                      </span>
+                    </div>
+
+                    {/* Comparativo de macros */}
+                    <div className="grid grid-cols-3 gap-2 text-[10px] border-t border-zinc-200 dark:border-zinc-800/85 pt-2.5">
+                      <div className="space-y-0.5">
+                        <span className="text-zinc-450 dark:text-zinc-500 font-bold uppercase">{translations[lang].protein}</span>
+                        <span className="block text-zinc-750 dark:text-zinc-200 font-mono">
+                          {Math.round(substitutingItem.protein)}g →{' '}
+                          <span className="text-rose-500 font-bold">{Math.round(selectedSubstituteFood.protein * ratio)}g</span>
+                        </span>
+                      </div>
+                      <div className="space-y-0.5">
+                        <span className="text-zinc-450 dark:text-zinc-500 font-bold uppercase">{translations[lang].carbs}</span>
+                        <span className="block text-zinc-750 dark:text-zinc-200 font-mono">
+                          {Math.round(substitutingItem.carbs)}g →{' '}
+                          <span className="text-blue-500 font-bold">{Math.round(selectedSubstituteFood.carbs * ratio)}g</span>
+                        </span>
+                      </div>
+                      <div className="space-y-0.5">
+                        <span className="text-zinc-450 dark:text-zinc-500 font-bold uppercase">{translations[lang].fat}</span>
+                        <span className="block text-zinc-750 dark:text-zinc-200 font-mono">
+                          {Math.round(substitutingItem.fat)}g →{' '}
+                          <span className="text-amber-500 font-bold">{Math.round(selectedSubstituteFood.fat * ratio)}g</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSubstitutingItem(null);
+                    setSelectedSubstituteFood(null);
+                    setSubstituteSearchTerm('');
+                  }}
+                  className="flex-1 py-3 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl text-xs font-bold text-zinc-500 dark:text-zinc-400 transition-all cursor-pointer"
+                >
+                  {lang === 'pt' ? 'Cancelar' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={!selectedSubstituteFood}
+                  className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-extrabold shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" />
+                  {lang === 'pt' ? 'Substituir' : 'Swap'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

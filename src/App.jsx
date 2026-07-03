@@ -495,7 +495,7 @@ export default function App() {
                 waterIntake={waterIntake}
                 setWaterIntake={handleWaterChange}
                 workoutDoneToday={workoutDoneToday}
-                setWorkoutDoneToday={handleWorkoutDoneChange}
+                setWorkoutDoneToday={setWorkoutDoneToday}
                 lang={lang}
                 activeDate={activeDate}
                 setActiveDate={handleActiveDateChange}
