@@ -16,9 +16,17 @@ import api from '@/constants/api';
 import { translations } from '../utils/translations';
 import { Ionicons } from '@expo/vector-icons';
 import { initialFoodDatabase } from '../data/foodDatabase';
+import { useSQLiteContext } from 'expo-sqlite';
+import { SyncManager } from '../db/sync';
 
 export default function DashboardScreen() {
   const { logout, lang } = useAuth();
+  const db = useSQLiteContext();
+  const syncManager = React.useMemo(() => new SyncManager(db), [db]);
+
+  // Estados de Conectividade / Fila Offline
+  const [isOffline, setIsOffline] = useState(false);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
   
   // Estados Principais
   const [profile, setProfile] = useState<any>(null);
@@ -65,31 +73,27 @@ export default function DashboardScreen() {
     return `${year}-${month}-${day}`;
   };
 
-  // Buscar dados sincronizados do Dashboard com suporte a datas
+  // Buscar dados sincronizados do Dashboard com suporte a datas e SQLite Offline
   const fetchDashboardData = async (isRefreshing = false, targetDate = activeDate) => {
     if (!isRefreshing) setLoading(true);
     try {
-      const [userRes, dietRes, workoutRes, waterRes, workoutDoneRes, dietLogsRes, compareRes] = await Promise.all([
-        api.get('/api/auth/me'),
-        api.get('/api/diet').catch(() => ({ data: null })),
-        api.get('/api/workout').catch(() => ({ data: null })),
-        api.get(`/api/tracker/water?date=${targetDate}`).catch(() => ({ data: { amount_ml: 0 } })),
-        api.get(`/api/tracker/workout-done?date=${targetDate}`).catch(() => ({ data: { isDone: false, workout_day_name: null } })),
-        api.get(`/api/tracker/diet?date=${targetDate}`).catch(() => ({ data: [] })),
-        api.get(`/api/tracker/diet/compare?date=${targetDate}`).catch(() => ({ data: null }))
-      ]);
-
-      setProfile(userRes.data.profile);
-      setDiet(dietRes.data);
-      setWorkout(workoutRes.data);
-      setWaterIntake(waterRes.data?.amount_ml || 0);
-      setWorkoutDoneToday(!!workoutDoneRes.data?.isDone);
-      setLoggedWorkoutName(workoutDoneRes.data?.workout_day_name || null);
-      setDietLogs(dietLogsRes.data || []);
-      setCompareData(compareRes.data || null);
+      const synced = await syncManager.syncFromServer(targetDate);
+      
+      setProfile(synced.profile);
+      setDiet(synced.diet);
+      setWorkout(synced.workout);
+      setWaterIntake(synced.waterIntake);
+      setWorkoutDoneToday(synced.workoutDoneToday);
+      setLoggedWorkoutName(synced.loggedWorkoutName);
+      setDietLogs(synced.dietLogs || []);
+      setCompareData(synced.compareData);
+      setIsOffline(synced.isOffline);
+      
+      const count = await syncManager.getPendingCount();
+      setPendingSyncCount(count);
     } catch (err) {
-      console.error('Erro ao buscar dados do dashboard:', err);
-      Alert.alert('Erro de Conexão', 'Não foi possível se conectar ao servidor da API.');
+      console.error('Erro ao buscar dados no SyncManager:', err);
+      setIsOffline(true);
     } finally {
       if (!isRefreshing) setLoading(false);
     }
@@ -137,36 +141,40 @@ export default function DashboardScreen() {
 
   // Ações de Hidratação
   const handleQuickWaterAdd = async (amount: number) => {
-    const oldVal = waterIntake;
     const newVal = waterIntake + amount;
     setWaterIntake(newVal);
-    try {
-      await api.post('/api/tracker/water', { amount_ml: newVal, date: activeDate });
-    } catch (err) {
-      console.error('Erro ao registrar água:', err);
-      setWaterIntake(oldVal);
-      Alert.alert('Erro de Sincronização', 'Não foi possível salvar os dados de água.');
-    }
+    
+    await syncManager.logWater(amount, activeDate);
+    const count = await syncManager.getPendingCount();
+    setPendingSyncCount(count);
   };
 
   const handleWaterReset = async () => {
-    const oldVal = waterIntake;
     setWaterIntake(0);
-    try {
-      await api.post('/api/tracker/water', { amount_ml: 0, date: activeDate });
-    } catch (err) {
-      console.error('Erro ao resetar água:', err);
-      setWaterIntake(oldVal);
-      Alert.alert('Erro de Sincronização', 'Não foi possível resetar o consumo de água.');
-    }
+    
+    await syncManager.resetWater(activeDate);
+    const count = await syncManager.getPendingCount();
+    setPendingSyncCount(count);
   };
 
   // Copiar planejamento de refeições para o diário real
   const handleCopyPlan = async () => {
     setCopyingPlan(true);
     try {
-      await api.post('/api/tracker/diet/copy-plan', { date: activeDate });
-      fetchDashboardData(true, activeDate);
+      if (isOffline) {
+        if (diet && diet.meals) {
+          await syncManager.copyBasePlan(activeDate, diet.meals);
+          const localData = await syncManager.getLocalDashboardData(activeDate);
+          setDietLogs(localData.dietLogs || []);
+          setCompareData(localData.compareData);
+          setPendingSyncCount(await syncManager.getPendingCount());
+        } else {
+          Alert.alert('Erro', 'Plano base indisponível em modo offline.');
+        }
+      } else {
+        await syncManager.copyBasePlan(activeDate, diet?.meals || []);
+        await fetchDashboardData(true, activeDate);
+      }
     } catch (err) {
       console.error('Erro ao importar plano de refeições:', err);
       Alert.alert('Erro', 'Não foi possível copiar o plano de refeições base.');
@@ -182,14 +190,12 @@ export default function DashboardScreen() {
     const ratio = newQty / item.quantity;
 
     try {
-      await api.put(`/api/tracker/diet/${item.id}`, {
-        quantity: newQty,
-        protein: item.protein * ratio,
-        carbs: item.carbs * ratio,
-        fat: item.fat * ratio,
-        calories: item.calories * ratio
-      });
-      fetchDashboardData(true, activeDate);
+      await syncManager.adjustFoodLogQuantity(item, newQty, ratio);
+      
+      const localData = await syncManager.getLocalDashboardData(activeDate);
+      setDietLogs(localData.dietLogs || []);
+      setCompareData(localData.compareData);
+      setPendingSyncCount(await syncManager.getPendingCount());
     } catch (err) {
       console.error(err);
       Alert.alert('Erro', 'Não foi possível ajustar a quantidade.');
@@ -197,10 +203,14 @@ export default function DashboardScreen() {
   };
 
   // Deletar alimento do diário
-  const handleDeleteLogItem = async (id: number) => {
+  const handleDeleteLogItem = async (id: any) => {
     try {
-      await api.delete(`/api/tracker/diet/${id}`);
-      fetchDashboardData(true, activeDate);
+      await syncManager.deleteFoodLog(id.toString());
+      
+      const localData = await syncManager.getLocalDashboardData(activeDate);
+      setDietLogs(localData.dietLogs || []);
+      setCompareData(localData.compareData);
+      setPendingSyncCount(await syncManager.getPendingCount());
     } catch (err) {
       console.error(err);
       Alert.alert('Erro', 'Não foi possível remover o alimento do diário.');
@@ -250,11 +260,12 @@ export default function DashboardScreen() {
     setLoggedWorkoutName(workoutName);
     setWorkoutDoneToday(isDone);
     try {
-      await api.post('/api/tracker/workout-done', {
-        workout_day_name: workoutName || 'Descanso',
-        date: activeDate,
-        isDone: workoutName !== null
-      });
+      if (workoutName === null) {
+        await syncManager.deleteWorkoutCheckIn(activeDate);
+      } else {
+        await syncManager.checkInWorkout(workoutName, activeDate);
+      }
+      setPendingSyncCount(await syncManager.getPendingCount());
     } catch (err) {
       console.error(err);
       setLoggedWorkoutName(null);
@@ -273,15 +284,13 @@ export default function DashboardScreen() {
 
     try {
       const updatedProfile = { ...profile, weight: weightNum };
-      
-      await Promise.all([
-        api.put('/api/auth/profile', updatedProfile),
-        api.post('/api/tracker/weight', { weight: weightNum, date: activeDate })
-      ]);
-
       setProfile(updatedProfile);
       setWeightModalVisible(false);
       setNewWeight('');
+
+      await syncManager.updateWeight(weightNum, activeDate);
+      setPendingSyncCount(await syncManager.getPendingCount());
+      
       Alert.alert('Sucesso', 'Peso corporal atualizado.');
     } catch (err) {
       console.error(err);
@@ -307,18 +316,17 @@ export default function DashboardScreen() {
     const ratio = qtyNum / editingLogItem.quantity;
 
     try {
-      await api.put(`/api/tracker/diet/${editingLogItem.id}`, {
-        quantity: qtyNum,
-        protein: editingLogItem.protein * ratio,
-        carbs: editingLogItem.carbs * ratio,
-        fat: editingLogItem.fat * ratio,
-        calories: editingLogItem.calories * ratio
-      });
-
+      await syncManager.adjustFoodLogQuantity(editingLogItem, qtyNum, ratio);
+      
       setQuantityModalVisible(false);
       setEditingLogItem(null);
       setEditingQuantity('');
-      fetchDashboardData(true, activeDate);
+      
+      const localData = await syncManager.getLocalDashboardData(activeDate);
+      setDietLogs(localData.dietLogs || []);
+      setCompareData(localData.compareData);
+      setPendingSyncCount(await syncManager.getPendingCount());
+      
       Alert.alert('Sucesso', 'Quantidade atualizada.');
     } catch (err) {
       console.error(err);
@@ -354,24 +362,38 @@ export default function DashboardScreen() {
     const ratio = equivalentQuantity / 100;
 
     try {
-      await api.put(`/api/tracker/diet/${substitutingItem.id}`, {
-        food_name: selectedSubstituteFood.name,
-        quantity: equivalentQuantity,
-        protein: selectedSubstituteFood.protein * ratio,
-        carbs: selectedSubstituteFood.carbs * ratio,
-        fat: selectedSubstituteFood.fat * ratio,
-        calories: originalCalories,
-      });
+      await syncManager.deleteFoodLog(substitutingItem.id.toString());
+      await syncManager.addFoodLog(
+        substitutingItem.meal_name || 'Almoço',
+        selectedSubstituteFood.name,
+        originalCalories,
+        equivalentQuantity,
+        {
+          protein: selectedSubstituteFood.protein * ratio,
+          carbs: selectedSubstituteFood.carbs * ratio,
+          fat: selectedSubstituteFood.fat * ratio
+        },
+        activeDate
+      );
 
       setSubstituteModalVisible(false);
       setSubstitutingItem(null);
       setSubstituteSearchTerm('');
       setSelectedSubstituteFood(null);
-      fetchDashboardData(true, activeDate);
+
+      const localData = await syncManager.getLocalDashboardData(activeDate);
+      setDietLogs(localData.dietLogs || []);
+      setCompareData(localData.compareData);
+      setPendingSyncCount(await syncManager.getPendingCount());
     } catch (err) {
       console.error('Erro ao substituir alimento no app:', err);
       Alert.alert('Erro', 'Não foi possível substituir o alimento.');
     }
+  };
+
+  const handleLogoutPress = async () => {
+    await syncManager.clearAllLocalTables();
+    await logout();
   };
 
   if (loading) {
@@ -390,7 +412,7 @@ export default function DashboardScreen() {
         <Text style={styles.warningText}>
           Você precisa preencher seu planejamento no assistente pelo site para sincronizar os dados no celular.
         </Text>
-        <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogoutPress}>
           <Text style={styles.logoutBtnText}>Fazer Logout</Text>
         </TouchableOpacity>
       </View>
@@ -447,7 +469,20 @@ export default function DashboardScreen() {
         />
       }
     >
-      
+      {/* Banner de Sincronização / Status Offline */}
+      {(isOffline || pendingSyncCount > 0) && (
+        <View style={[
+          styles.syncBanner, 
+          isOffline ? styles.syncBannerOffline : styles.syncBannerPending
+        ]}>
+          <Text style={styles.syncBannerText}>
+            {isOffline 
+              ? `📶 Operando Offline${pendingSyncCount > 0 ? ` (${pendingSyncCount} pendentes)` : ''}`
+              : `🔄 Sincronizando ${pendingSyncCount} alteração(ões)...`}
+          </Text>
+        </View>
+      )}
+
       {/* Header com Navegação de Data */}
       <View style={styles.header}>
         <View>
@@ -1377,6 +1412,28 @@ const styles: any = StyleSheet.create({
   previewMacros: {
     color: '#d4d4d8',
     fontSize: 10,
+    fontWeight: '700',
+  },
+  syncBanner: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  syncBannerOffline: {
+    backgroundColor: '#b91c1c20',
+    borderWidth: 1,
+    borderColor: '#ef444450',
+  },
+  syncBannerPending: {
+    backgroundColor: '#1e3a8a20',
+    borderWidth: 1,
+    borderColor: '#3b82f650',
+  },
+  syncBannerText: {
+    color: '#ffffff',
+    fontSize: 11,
     fontWeight: '700',
   },
 });

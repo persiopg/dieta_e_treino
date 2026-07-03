@@ -16,9 +16,13 @@ import { initialFoodDatabase } from '../data/foodDatabase';
 import { useAuth } from '@/hooks/useAuth';
 import { translations } from '../utils/translations';
 import { Ionicons } from '@expo/vector-icons';
+import { useSQLiteContext } from 'expo-sqlite';
+import { SyncManager } from '../db/sync';
 
 export default function DietScreen() {
   const { lang } = useAuth();
+  const db = useSQLiteContext();
+  const syncManager = React.useMemo(() => new SyncManager(db), [db]);
   
   // Abas internas da tela de Dieta no celular
   const [activeTab, setActiveTab] = useState<'diary' | 'recommended'>('diary');
@@ -62,19 +66,19 @@ export default function DietScreen() {
     return `${year}-${month}-${day}`;
   };
 
-  // Carregar dados de Dieta e Diário
+  // Carregar dados de Dieta e Diário via SyncManager
   const fetchDietData = async (isRefreshing = false, targetDate = activeDate) => {
     if (!isRefreshing) setLoading(true);
     try {
-      const [dietRes, dietLogsRes] = await Promise.all([
-        api.get('/api/diet').catch(() => ({ data: null })),
-        api.get(`/api/tracker/diet?date=${targetDate}`).catch(() => ({ data: [] }))
-      ]);
-      setDiet(dietRes.data);
-      setDietLogs(dietLogsRes.data || []);
+      const synced = await syncManager.syncFromServer(targetDate);
+      setDiet(synced.diet);
+      setDietLogs(synced.dietLogs || []);
     } catch (err) {
       console.error(err);
-      Alert.alert('Erro', 'Falha ao sincronizar dados nutricionais.');
+      // Fallback para SQLite local
+      const localData = await syncManager.getLocalDashboardData(targetDate);
+      setDiet(localData.diet);
+      setDietLogs(localData.dietLogs || []);
     } finally {
       if (!isRefreshing) setLoading(false);
     }
@@ -149,14 +153,9 @@ export default function DietScreen() {
     const newQty = Math.max(10, Math.round(item.quantity * factor));
     const ratio = newQty / item.quantity;
     try {
-      await api.put(`/api/tracker/diet/${item.id}`, {
-        quantity: newQty,
-        protein: item.protein * ratio,
-        carbs: item.carbs * ratio,
-        fat: item.fat * ratio,
-        calories: item.calories * ratio
-      });
-      fetchDietData(true, activeDate);
+      await syncManager.adjustFoodLogQuantity(item, newQty, ratio);
+      const localData = await syncManager.getLocalDashboardData(activeDate);
+      setDietLogs(localData.dietLogs || []);
     } catch (err) {
       console.error(err);
     }
@@ -165,8 +164,9 @@ export default function DietScreen() {
   // Excluir do diário real
   const handleDeleteLogItem = async (id: number) => {
     try {
-      await api.delete(`/api/tracker/diet/${id}`);
-      fetchDietData(true, activeDate);
+      await syncManager.deleteFoodLog(id.toString());
+      const localData = await syncManager.getLocalDashboardData(activeDate);
+      setDietLogs(localData.dietLogs || []);
     } catch (err) {
       console.error(err);
     }
@@ -181,19 +181,26 @@ export default function DietScreen() {
     const equivalentQuantity = Math.round((originalCalories * 100) / newFoodCal100g);
     const ratio = equivalentQuantity / 100;
     try {
-      await api.put(`/api/tracker/diet/${substitutingItem.id}`, {
-        food_name: selectedSubstituteFood.name,
-        quantity: equivalentQuantity,
-        protein: selectedSubstituteFood.protein * ratio,
-        carbs: selectedSubstituteFood.carbs * ratio,
-        fat: selectedSubstituteFood.fat * ratio,
-        calories: originalCalories,
-      });
+      await syncManager.deleteFoodLog(substitutingItem.id.toString());
+      await syncManager.addFoodLog(
+        substitutingItem.meal_name || 'Almoço',
+        selectedSubstituteFood.name,
+        originalCalories,
+        equivalentQuantity,
+        {
+          protein: selectedSubstituteFood.protein * ratio,
+          carbs: selectedSubstituteFood.carbs * ratio,
+          fat: selectedSubstituteFood.fat * ratio
+        },
+        activeDate
+      );
       setSubstituteModalVisible(false);
       setSubstitutingItem(null);
       setSubstituteSearchTerm('');
       setSelectedSubstituteFood(null);
-      fetchDietData(true, activeDate);
+      
+      const localData = await syncManager.getLocalDashboardData(activeDate);
+      setDietLogs(localData.dietLogs || []);
     } catch (err) {
       console.error(err);
       Alert.alert('Erro', 'Não foi possível fazer a troca.');
@@ -204,8 +211,16 @@ export default function DietScreen() {
   const handleCopyFullPlan = async () => {
     setCopyingPlan(true);
     try {
-      await api.post('/api/tracker/diet/copy-plan', { date: activeDate });
-      fetchDietData(true, activeDate);
+      const localData = await syncManager.getLocalDashboardData(activeDate);
+      const activeDietPlan = localData.diet;
+      if (activeDietPlan && activeDietPlan.meals) {
+        await syncManager.copyBasePlan(activeDate, activeDietPlan.meals);
+        const refreshed = await syncManager.getLocalDashboardData(activeDate);
+        setDietLogs(refreshed.dietLogs || []);
+      } else {
+        await api.post('/api/tracker/diet/copy-plan', { date: activeDate });
+        await fetchDietData(true, activeDate);
+      }
     } catch (err) {
       console.error(err);
       Alert.alert('Erro', 'Erro ao importar dieta recomendada.');
@@ -221,18 +236,24 @@ export default function DietScreen() {
   // Copiar item planejado individual para o diário de hoje
   const handleCopySingleItemToDiary = async (mealName: string, item: any) => {
     try {
-      await api.post('/api/tracker/diet', {
-        meal_name: mealName,
-        food_name: item.name,
-        quantity: item.quantity,
-        protein: (item.protein * item.quantity) / 100,
-        carbs: (item.carbs * item.quantity) / 100,
-        fat: (item.fat * item.quantity) / 100,
-        calories: (item.calories * item.quantity) / 100,
-        date: activeDate
-      });
+      const quantity = Number(item.quantity);
+      const calories = (item.calories * quantity) / 100;
+      const protein = (item.protein * quantity) / 100;
+      const carbs = (item.carbs * quantity) / 100;
+      const fat = (item.fat * quantity) / 100;
+
+      await syncManager.addFoodLog(
+        mealName,
+        item.name,
+        calories,
+        quantity,
+        { protein, carbs, fat },
+        activeDate
+      );
       Alert.alert('Sucesso', `${item.name} copiado para o seu diário de hoje!`);
-      fetchDietData(true, activeDate);
+      
+      const localData = await syncManager.getLocalDashboardData(activeDate);
+      setDietLogs(localData.dietLogs || []);
     } catch (err) {
       console.error(err);
       Alert.alert('Erro', 'Não foi possível copiar o alimento.');
@@ -274,21 +295,25 @@ export default function DietScreen() {
     if (targetType === 'diary') {
       // Adicionar no diário de hoje
       try {
-        await api.post('/api/tracker/diet', {
-          meal_name: selectedMealNameOrId,
-          food_name: selectedFood.name,
-          quantity: qty,
-          protein: selectedFood.protein * factor,
-          carbs: selectedFood.carbs * factor,
-          fat: selectedFood.fat * factor,
-          calories: selectedFood.calories * factor,
-          date: activeDate
-        });
+        await syncManager.addFoodLog(
+          selectedMealNameOrId.toString(),
+          selectedFood.name,
+          selectedFood.calories * factor,
+          qty,
+          {
+            protein: selectedFood.protein * factor,
+            carbs: selectedFood.carbs * factor,
+            fat: selectedFood.fat * factor
+          },
+          activeDate
+        );
         setAddFoodModalVisible(false);
         setSelectedFood(null);
         setSearchQuery('');
         setFoodQuantity('100');
-        fetchDietData(true, activeDate);
+        
+        const localData = await syncManager.getLocalDashboardData(activeDate);
+        setDietLogs(localData.dietLogs || []);
       } catch (err) {
         console.error(err);
       }

@@ -15,6 +15,8 @@ import api from '@/constants/api';
 import { useAuth } from '@/hooks/useAuth';
 import { translations } from '../utils/translations';
 import { Ionicons } from '@expo/vector-icons';
+import { useSQLiteContext } from 'expo-sqlite';
+import { SyncManager } from '../db/sync';
 const exercisesDatabase = [
   // Peito
   { name: 'Supino Reto com Barra', category: 'Peito' },
@@ -56,6 +58,8 @@ const exercisesDatabase = [
 
 export default function WorkoutScreen() {
   const { lang } = useAuth();
+  const db = useSQLiteContext();
+  const syncManager = React.useMemo(() => new SyncManager(db), [db]);
   
   // Abas internas de treino no celular
   const [activeTab, setActiveTab] = useState<'diary' | 'recommended'>('diary');
@@ -106,19 +110,19 @@ export default function WorkoutScreen() {
     return `${year}-${month}-${day}`;
   };
 
-  // Carregar dados de treinos e check-in
+  // Carregar dados de treinos e check-in via SyncManager
   const fetchWorkoutData = async (isRefreshing = false, targetDate = activeDate) => {
     if (!isRefreshing) setLoading(true);
     try {
-      const [workoutRes, workoutDoneRes] = await Promise.all([
-        api.get('/api/workout').catch(() => ({ data: null })),
-        api.get(`/api/tracker/workout-done?date=${targetDate}`).catch(() => ({ data: { isDone: false, workout_day_name: null } }))
-      ]);
-      setRoutine(workoutRes.data);
-      setLoggedWorkoutName(workoutDoneRes.data.isDone ? workoutDoneRes.data.workout_day_name : null);
+      const synced = await syncManager.syncFromServer(targetDate);
+      setRoutine(synced.workout);
+      setLoggedWorkoutName(synced.loggedWorkoutName);
     } catch (err) {
       console.error(err);
-      Alert.alert('Erro', 'Não foi possível carregar os dados de treinos.');
+      // Fallback para SQLite local
+      const localData = await syncManager.getLocalDashboardData(targetDate);
+      setRoutine(localData.workout);
+      setLoggedWorkoutName(localData.loggedWorkoutName);
     } finally {
       if (!isRefreshing) setLoading(false);
     }
@@ -139,14 +143,14 @@ export default function WorkoutScreen() {
     if (routine?.days) {
       const activeDay = routine.days[selectedRecommendedDayIdx];
       if (activeDay?.exercises) {
-        const newCharges: {[key: number]: string} = {};
+        const initialCharges: { [key: number]: string } = {};
         activeDay.exercises.forEach((ex: any) => {
-          newCharges[ex.id] = ex.weight ? ex.weight.toString() : '';
+          initialCharges[ex.id] = ex.weight ? ex.weight.toString() : '0';
         });
-        setCharges(newCharges);
+        setCharges(initialCharges);
       }
     }
-  }, [selectedRecommendedDayIdx, routine]);
+  }, [routine, selectedRecommendedDayIdx]);
 
   // Efeito do Timer de Descanso
   useEffect(() => {
@@ -217,19 +221,18 @@ export default function WorkoutScreen() {
     const isDone = workoutName !== 'Descanso' && workoutName !== null;
     setLoggedWorkoutName(workoutName);
     try {
-      await api.post('/api/tracker/workout-done', {
-        workout_day_name: workoutName || 'Descanso',
-        date: activeDate,
-        isDone: workoutName !== null
-      });
-      fetchWorkoutData(true, activeDate);
+      if (workoutName === null) {
+        await syncManager.deleteWorkoutCheckIn(activeDate);
+      } else {
+        await syncManager.checkInWorkout(workoutName, activeDate);
+      }
     } catch (err) {
       console.error(err);
       Alert.alert('Erro', 'Não foi possível salvar o status do treino.');
     }
   };
 
-  // Salvar carga de peso de exercício no diário/ficha
+  // Salvar carga de peso de exercício no diário/ficha offline
   const handleSaveWeight = async (dayId: number, exerciseId: number) => {
     const weightVal = charges[exerciseId];
     const weightNum = Number(weightVal);
@@ -241,8 +244,11 @@ export default function WorkoutScreen() {
 
     setSavingExerciseId(exerciseId);
     try {
-      await api.put(`/api/workout/day/${dayId}/exercise/${exerciseId}`, { weight: weightNum });
-      fetchWorkoutData(true, activeDate);
+      await syncManager.updateExerciseWeight(dayId, exerciseId, weightNum);
+      
+      const localData = await syncManager.getLocalDashboardData(activeDate);
+      setRoutine(localData.workout);
+      
       Alert.alert('Sucesso', 'Carga atualizada!');
     } catch (err) {
       console.error(err);

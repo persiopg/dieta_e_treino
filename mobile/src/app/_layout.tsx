@@ -51,10 +51,15 @@ function AppContent() {
   );
 }
 
+import { SQLiteProvider } from 'expo-sqlite';
+import { migrateDbIfNeeded } from '../db/database';
+
 export default function TabLayout() {
   return (
     <AuthProvider>
-      <AppContent />
+      <SQLiteProvider databaseName="fitlife.db" onInit={migrateDbIfNeeded}>
+        <AppContent />
+      </SQLiteProvider>
     </AuthProvider>
   );
 }

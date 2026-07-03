@@ -45,6 +45,7 @@ export default function Login({ onLoginSuccess, onNavigateToRegister }: LoginPro
     } catch (err: any) {
       console.error(err);
       setError(
+        err.response?.data?.error ||
         err.response?.data?.message || 
         'Erro ao conectar ao servidor. Verifique se o backend está ligado e na mesma rede Wi-Fi.'
       );
