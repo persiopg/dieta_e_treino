@@ -169,7 +169,14 @@ router.post('/workout-done', authMiddleware, async (req, res) => {
 
       // 2. Determinar o MET do treino
       let met = 4.5;
-      if (workout_day_name && workout_day_name.toLowerCase().includes('cardio')) {
+      const isRestDay = workout_day_name && (
+        workout_day_name.toLowerCase().includes('descanso') || 
+        workout_day_name.toLowerCase().includes('off')
+      );
+
+      if (isRestDay) {
+        met = 0;
+      } else if (workout_day_name && workout_day_name.toLowerCase().includes('cardio')) {
         met = 7.5;
       } else {
         // Obter os exercícios dessa ficha para tirar a média de METs
