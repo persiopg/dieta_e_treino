@@ -439,8 +439,16 @@ export default function DashboardScreen() {
   const waterTarget = Math.round(profile.weight * 35);
   const waterPercent = Math.min((waterIntake / waterTarget) * 100, 100);
 
-  // Agrupamento por Refeição no mobile
-  const mealsStructure = ['Café da Manhã', 'Almoço', 'Lanche', 'Jantar'];
+  // Agrupamento por Refeição no mobile dinâmico
+  const mealsPerDay = profile?.mealsPerDay || 4;
+  let mealsStructure = ['Café da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar'];
+  if (mealsPerDay === 3) {
+    mealsStructure = ['Café da Manhã', 'Almoço', 'Jantar'];
+  } else if (mealsPerDay === 5) {
+    mealsStructure = ['Café da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar', 'Ceia'];
+  } else if (mealsPerDay === 6) {
+    mealsStructure = ['Café da Manhã', 'Lanche da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar', 'Ceia'];
+  }
   const groupedDietLogs: { [key: string]: any[] } = {};
   mealsStructure.forEach(meal => {
     groupedDietLogs[meal] = dietLogs.filter((log: any) => log.meal_name === meal);
@@ -591,6 +599,7 @@ export default function DashboardScreen() {
                     <View style={{ flex: 1, marginRight: 8 }}>
                       <Text style={styles.mealItemName} numberOfLines={1} ellipsizeMode="tail">{item.food_name}</Text>
                       <Text style={styles.mealItemSub}>
+                        {item.food_name?.toLowerCase().includes('ovo') && `(~${(item.quantity / 50).toFixed(1)} unid) • `}
                         P: {Math.round(item.protein)}g • C: {Math.round(item.carbs)}g • G: {Math.round(item.fat)}g
                       </Text>
                     </View>

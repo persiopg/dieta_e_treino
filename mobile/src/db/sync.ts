@@ -208,7 +208,7 @@ export class SyncManager {
     );
 
     // 2. Enfileirar ou atualizar na fila
-    if (item.id.startsWith('temp_')) {
+    if (String(item.id).startsWith('temp_')) {
       // Se for um item temporário ainda não sincronizado, podemos atualizar a payload do ADD_FOOD_LOG original na fila
       const queue = await this.db.getAllAsync<{ id: number; payload: string }>('SELECT * FROM sync_queue WHERE action = \'ADD_FOOD_LOG\'');
       for (const q of queue) {
@@ -237,7 +237,7 @@ export class SyncManager {
     });
     
     // Só enfileira UPDATE se o item já tem ID real do servidor (não temporário)
-    if (!item.id.startsWith('temp_')) {
+    if (!String(item.id).startsWith('temp_')) {
       await this.db.runAsync(
         "INSERT INTO sync_queue (action, payload, target_id, created_at) VALUES ('UPDATE_FOOD_LOG', ?, ?, datetime('now'))",
         [payload, item.id]
@@ -253,7 +253,7 @@ export class SyncManager {
     await this.db.runAsync('DELETE FROM diet_logs WHERE id = ?', [id]);
 
     // 2. Gerenciar fila
-    if (id.startsWith('temp_')) {
+    if (String(id).startsWith('temp_')) {
       // Se for item temporário, remove o ADD_FOOD_LOG correspondente da fila e qualquer UPDATE_FOOD_LOG associado
       const queue = await this.db.getAllAsync<{ id: number; payload: string; action: string; target_id: string }>('SELECT * FROM sync_queue');
       for (const q of queue) {
@@ -482,11 +482,10 @@ export class SyncManager {
       const compareData = compareRes.data || null;
 
       // 3. Atualizar Tabelas Locais (Caches) no SQLite
-      // Perfil
       await this.db.runAsync('DELETE FROM profile');
       await this.db.runAsync(
-        `INSERT INTO profile (id, name, email, weight, height, target_calories, target_protein, target_carbs, target_fat) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO profile (id, name, email, weight, height, target_calories, target_protein, target_carbs, target_fat, meals_per_day, use_whey) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           profile.id?.toString() || '1',
           profile.name || '',
@@ -496,7 +495,9 @@ export class SyncManager {
           profile.targetCalories || 0,
           profile.macros?.protein || 0,
           profile.macros?.carbs || 0,
-          profile.macros?.fat || 0
+          profile.macros?.fat || 0,
+          profile.mealsPerDay || 4,
+          profile.useWhey ? 1 : 0
         ]
       );
 
@@ -590,6 +591,8 @@ export class SyncManager {
           weight: localProfile.weight,
           height: localProfile.height,
           targetCalories: localProfile.target_calories,
+          mealsPerDay: localProfile.meals_per_day,
+          useWhey: localProfile.use_whey === 1,
           macros: {
             protein: localProfile.target_protein,
             carbs: localProfile.target_carbs,

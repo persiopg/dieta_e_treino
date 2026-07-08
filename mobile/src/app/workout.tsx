@@ -11,6 +11,7 @@ import {
   TextInput,
   RefreshControl
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import api from '@/constants/api';
 import { useAuth } from '@/hooks/useAuth';
 import { translations } from '../utils/translations';
@@ -374,7 +375,7 @@ export default function WorkoutScreen() {
   const loggedFicha = routine?.days?.find((d: any) => d.name === loggedWorkoutName);
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       
       {/* Abas Superiores de Controle de Tela */}
       <View style={styles.tabsHeader as any}>
@@ -779,7 +780,7 @@ export default function WorkoutScreen() {
         </View>
       </Modal>
 
-    </View>
+    </SafeAreaView>
   );
 }
 

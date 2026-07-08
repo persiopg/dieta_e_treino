@@ -2,7 +2,7 @@ import { type SQLiteDatabase } from 'expo-sqlite';
 import { initialFoodDatabase } from '../data/foodDatabase';
 
 export async function migrateDbIfNeeded(db: SQLiteDatabase) {
-  const DATABASE_VERSION = 4;
+  const DATABASE_VERSION = 5;
   
   // Obter a versão atual do banco de dados
   const result = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
@@ -27,7 +27,9 @@ export async function migrateDbIfNeeded(db: SQLiteDatabase) {
         target_calories INTEGER,
         target_protein INTEGER,
         target_carbs INTEGER,
-        target_fat INTEGER
+        target_fat INTEGER,
+        meals_per_day INTEGER DEFAULT 4,
+        use_whey INTEGER DEFAULT 1
       );
 
       CREATE TABLE IF NOT EXISTS diet_logs (
@@ -140,6 +142,18 @@ export async function migrateDbIfNeeded(db: SQLiteDatabase) {
     }
     await db.execAsync('PRAGMA user_version = 4');
     currentVersion = 4;
+  }
+
+  if (currentVersion === 4) {
+    try {
+      await db.execAsync('ALTER TABLE profile ADD COLUMN meals_per_day INTEGER DEFAULT 4');
+      await db.execAsync('ALTER TABLE profile ADD COLUMN use_whey INTEGER DEFAULT 1');
+      console.log('Colunas meals_per_day e use_whey adicionadas à tabela profile no SQLite local (v5).');
+    } catch (e) {
+      console.log('Tentativa de adicionar colunas meals_per_day/use_whey falhou:', e);
+    }
+    await db.execAsync('PRAGMA user_version = 5');
+    currentVersion = 5;
   }
 }
 

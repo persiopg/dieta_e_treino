@@ -11,6 +11,7 @@ import {
   TextInput,
   RefreshControl
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import api from '@/constants/api';
 import { initialFoodDatabase } from '../data/foodDatabase';
 import { useAuth } from '@/hooks/useAuth';
@@ -30,6 +31,7 @@ export default function DietScreen() {
   // Estados de Dados
   const [diet, setDiet] = useState<any>(null); // Plano recomendado base
   const [dietLogs, setDietLogs] = useState<any[]>([]); // Diário alimentar real
+  const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [copyingPlan, setCopyingPlan] = useState(false);
@@ -66,19 +68,20 @@ export default function DietScreen() {
     return `${year}-${month}-${day}`;
   };
 
-  // Carregar dados de Dieta e Diário via SyncManager
   const fetchDietData = async (isRefreshing = false, targetDate = activeDate) => {
     if (!isRefreshing) setLoading(true);
     try {
       const synced = await syncManager.syncFromServer(targetDate);
       setDiet(synced.diet);
       setDietLogs(synced.dietLogs || []);
+      setProfile(synced.profile);
     } catch (err) {
       console.error(err);
       // Fallback para SQLite local
       const localData = await syncManager.getLocalDashboardData(targetDate);
       setDiet(localData.diet);
       setDietLogs(localData.dietLogs || []);
+      setProfile(localData.profile);
     } finally {
       if (!isRefreshing) setLoading(false);
     }
@@ -101,8 +104,8 @@ export default function DietScreen() {
       if (searchQuery.trim().length > 1) {
         try {
           const terms = searchQuery.trim().split(/\s+/)
-            .map(t => t.toLowerCase().replace(/[,.;()]/g, ''))
-            .filter(t => t.length > 2);
+            .map((t: string) => t.toLowerCase().replace(/[,.;()]/g, ''))
+            .filter((t: string) => t.length > 2);
 
           if (terms.length > 0) {
             const whereClauses = terms.map(() => 'name LIKE ?');
@@ -110,7 +113,7 @@ export default function DietScreen() {
             const finalParams: any[] = [];
 
             // Pontuação por termo
-            terms.forEach(t => {
+            terms.forEach((t: string) => {
               scoreClauses.push('(CASE WHEN name LIKE ? THEN 3 ELSE 0 END)');
               finalParams.push(`%${t}%`);
             });
@@ -120,7 +123,7 @@ export default function DietScreen() {
             finalParams.push(`${terms[0]}%`);
 
             // Parâmetros do WHERE
-            terms.forEach(t => {
+            terms.forEach((t: string) => {
               finalParams.push(`%${t}%`);
             });
 
@@ -161,8 +164,8 @@ export default function DietScreen() {
       if (substituteSearchTerm.trim().length > 1) {
         try {
           const terms = substituteSearchTerm.trim().split(/\s+/)
-            .map(t => t.toLowerCase().replace(/[,.;()]/g, ''))
-            .filter(t => t.length > 2);
+            .map((t: string) => t.toLowerCase().replace(/[,.;()]/g, ''))
+            .filter((t: string) => t.length > 2);
 
           if (terms.length > 0) {
             const whereClauses = terms.map(() => 'name LIKE ?');
@@ -170,7 +173,7 @@ export default function DietScreen() {
             const finalParams: any[] = [];
 
             // Pontuação por termo
-            terms.forEach(t => {
+            terms.forEach((t: string) => {
               scoreClauses.push('(CASE WHEN name LIKE ? THEN 3 ELSE 0 END)');
               finalParams.push(`%${t}%`);
             });
@@ -180,7 +183,7 @@ export default function DietScreen() {
             finalParams.push(`${terms[0]}%`);
 
             // Parâmetros do WHERE
-            terms.forEach(t => {
+            terms.forEach((t: string) => {
               finalParams.push(`%${t}%`);
             });
 
@@ -449,8 +452,16 @@ export default function DietScreen() {
     );
   }
 
-  // Agrupamento do diário
-  const mealsStructure = ['Café da Manhã', 'Almoço', 'Lanche', 'Jantar'];
+  // Agrupamento do diário dinâmico baseado no perfil do usuário
+  const mealsPerDay = profile?.mealsPerDay || 4;
+  let mealsStructure = ['Café da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar'];
+  if (mealsPerDay === 3) {
+    mealsStructure = ['Café da Manhã', 'Almoço', 'Jantar'];
+  } else if (mealsPerDay === 5) {
+    mealsStructure = ['Café da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar', 'Ceia'];
+  } else if (mealsPerDay === 6) {
+    mealsStructure = ['Café da Manhã', 'Lanche da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar', 'Ceia'];
+  }
   const groupedDietLogs: { [key: string]: any[] } = {};
   mealsStructure.forEach(m => groupedDietLogs[m] = dietLogs.filter((l: any) => l.meal_name === m));
   dietLogs.forEach((l: any) => {
@@ -467,7 +478,7 @@ export default function DietScreen() {
   let consumedFat = 0;
 
   if (dietLogs && dietLogs.length > 0) {
-    dietLogs.forEach(l => {
+    dietLogs.forEach((l: any) => {
       consumedCal += Math.round(Number(l.calories));
       consumedProtein += Math.round(Number(l.protein));
       consumedCarbs += Math.round(Number(l.carbs));
@@ -476,7 +487,7 @@ export default function DietScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       
       {/* Botões de Alternância de Abas Superiores */}
       <View style={styles.tabsHeader as any}>
@@ -577,7 +588,9 @@ export default function DietScreen() {
                           <View style={{ flex: 1 }}>
                             <Text style={styles.itemName}>{item.food_name}</Text>
                             <Text style={styles.itemWeight}>
-                              {item.quantity}g • P:{Math.round(item.protein)}g C:{Math.round(item.carbs)}g G:{Math.round(item.fat)}g
+                              {item.quantity}g
+                              {item.food_name?.toLowerCase().includes('ovo') && ` (~${(item.quantity / 50).toFixed(1)} unid)`}
+                              {` • P:${Math.round(item.protein)}g C:${Math.round(item.carbs)}g G:${Math.round(item.fat)}g`}
                             </Text>
                           </View>
                           
@@ -684,7 +697,9 @@ export default function DietScreen() {
                             <View style={{ flex: 1 }}>
                               <Text style={styles.itemName}>{item.name}</Text>
                               <Text style={styles.itemWeight}>
-                                {item.quantity}g • P:{item.protein}g C:{item.carbs}g G:{item.fat}g
+                                {item.quantity}g
+                                {item.name?.toLowerCase().includes('ovo') && ` (~${(item.quantity / 50).toFixed(1)} unid)`}
+                                {` • P:${item.protein}g C:${item.carbs}g G:${item.fat}g`}
                               </Text>
                             </View>
                             <View style={styles.itemActionsRow as any}>
@@ -876,7 +891,7 @@ export default function DietScreen() {
         </View>
       </Modal>
 
-    </View>
+    </SafeAreaView>
   );
 }
 
