@@ -47,6 +47,8 @@ export default function App() {
   const [waterIntake, setWaterIntake] = useState(0);
   const [workoutDoneToday, setWorkoutDoneToday] = useState(false);
   const [loggedWorkoutName, setLoggedWorkoutName] = useState(null);
+  const [workoutCaloriesToday, setWorkoutCaloriesToday] = useState(0);
+  const [workoutDurationToday, setWorkoutDurationToday] = useState(0);
   const [dietLogs, setDietLogs] = useState([]);
   const [activeDate, setActiveDate] = useState(() => getLocalDateString());
   
@@ -69,6 +71,8 @@ export default function App() {
       setWaterIntake(0);
       setWorkoutDoneToday(false);
       setLoggedWorkoutName(null);
+      setWorkoutCaloriesToday(0);
+      setWorkoutDurationToday(0);
       setDietLogs([]);
       setActiveDate(getLocalDateString());
     }
@@ -132,6 +136,8 @@ export default function App() {
       setWaterIntake(waterRes.data.amount_ml);
       setWorkoutDoneToday(workoutDoneRes.data.isDone);
       setLoggedWorkoutName(workoutDoneRes.data.workout_day_name || null);
+      setWorkoutCaloriesToday(workoutDoneRes.data.calories_burned || 0);
+      setWorkoutDurationToday(workoutDoneRes.data.duration_minutes || 0);
       setDietLogs(dietLogsRes.data);
       
       if (shouldRedirect) {
@@ -187,6 +193,8 @@ export default function App() {
         setWorkout(null);
         setWaterIntake(0);
         setWorkoutDoneToday(false);
+        setWorkoutCaloriesToday(0);
+        setWorkoutDurationToday(0);
         setActiveTab('wizard');
       } catch (err) {
         console.error('Erro ao resetar perfil no banco.', err);
@@ -229,7 +237,7 @@ export default function App() {
   };
 
   // Salvar check-in de treino no dia ativo
-  const handleWorkoutCheckIn = async (workoutName) => {
+  const handleWorkoutCheckIn = async (workoutName, durationMinutes) => {
     const isDone = workoutName !== 'Descanso' && workoutName !== null;
     setLoggedWorkoutName(workoutName);
     setWorkoutDoneToday(isDone);
@@ -238,7 +246,8 @@ export default function App() {
         await axios.post('/api/tracker/workout-done', {
           workout_day_name: workoutName || 'Descanso',
           date: activeDate,
-          isDone: workoutName !== null
+          isDone: workoutName !== null,
+          duration_minutes: durationMinutes
         });
         fetchPlannerAndLogs(false, activeDate);
       } catch (err) {
@@ -496,6 +505,8 @@ export default function App() {
                 setWaterIntake={handleWaterChange}
                 workoutDoneToday={workoutDoneToday}
                 setWorkoutDoneToday={setWorkoutDoneToday}
+                workoutCaloriesToday={workoutCaloriesToday}
+                workoutDurationToday={workoutDurationToday}
                 lang={lang}
                 activeDate={activeDate}
                 setActiveDate={handleActiveDateChange}
@@ -527,6 +538,8 @@ export default function App() {
                 setDiet={handleUpdateDiet}
                 loggedWorkoutName={loggedWorkoutName}
                 onWorkoutCheckIn={handleWorkoutCheckIn}
+                workoutCaloriesToday={workoutCaloriesToday}
+                workoutDurationToday={workoutDurationToday}
                 lang={lang}
                 activeDate={activeDate}
                 setActiveDate={handleActiveDateChange}

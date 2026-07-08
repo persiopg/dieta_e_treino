@@ -190,6 +190,24 @@ async function createTables() {
   for (const query of queries) {
     await pool.query(query);
   }
+
+  // Migrações de colunas adicionais para Treinos Inteligentes e MET
+  try {
+    await pool.query("ALTER TABLE workout_exercises ADD COLUMN rationale TEXT");
+  } catch (e) {}
+  try {
+    await pool.query("ALTER TABLE workout_exercises ADD COLUMN expected_result TEXT");
+  } catch (e) {}
+  try {
+    await pool.query("ALTER TABLE workout_exercises ADD COLUMN met DECIMAL(3,1) DEFAULT 3.5");
+  } catch (e) {}
+  try {
+    await pool.query("ALTER TABLE workout_logs ADD COLUMN duration_minutes INT DEFAULT 45");
+  } catch (e) {}
+  try {
+    await pool.query("ALTER TABLE workout_logs ADD COLUMN calories_burned INT DEFAULT 0");
+  } catch (e) {}
+
   console.log('Tabelas verificadas/criadas com sucesso no MySQL.');
 }
 

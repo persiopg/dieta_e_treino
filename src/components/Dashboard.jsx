@@ -37,6 +37,8 @@ export default function Dashboard({
   setWaterIntake, 
   workoutDoneToday, 
   setWorkoutDoneToday,
+  workoutCaloriesToday = 0,
+  workoutDurationToday = 0,
   lang = 'pt',
   activeDate,
   setActiveDate,
@@ -233,11 +235,12 @@ export default function Dashboard({
     });
   }
 
-  const caloriePercentage = Math.min(Math.round((consumedCalories / profile.targetCalories) * 100), 100);
+  const netCalories = consumedCalories - workoutCaloriesToday;
+  const caloriePercentage = Math.min(Math.round((netCalories / profile.targetCalories) * 100), 100);
   const proteinPercentage = Math.min(Math.round((consumedProtein / profile.macros.protein) * 100), 100);
   const carbsPercentage = Math.min(Math.round((consumedCarbs / profile.macros.carbs) * 100), 100);
   const fatPercentage = Math.min(Math.round((consumedFat / profile.macros.fat) * 100), 100);
-  const remainingCalories = profile.targetCalories - consumedCalories;
+  const remainingCalories = profile.targetCalories - netCalories;
 
   // Frase de conselho dinâmico da IA
   const getAiMessage = () => {
@@ -489,11 +492,24 @@ export default function Dashboard({
       setLoggedWorkoutName(workoutName);
       setWorkoutDoneToday(isDone);
       
+      let durationMinutes = 60;
+      if (isDone) {
+        const val = window.prompt(lang === 'pt' ? 'Quantos minutos durou seu treino?' : 'How many minutes did your workout last?', '60');
+        if (val) {
+          const num = Number(val);
+          if (!isNaN(num) && num > 0) {
+            durationMinutes = num;
+          }
+        }
+      }
+      
       await axios.post('/api/tracker/workout-done', {
         workout_day_name: workoutName || 'Descanso',
         date: activeDate,
-        isDone: workoutName !== null
+        isDone: workoutName !== null,
+        duration_minutes: durationMinutes
       });
+      if (onRefreshData) onRefreshData();
     } catch (err) {
       console.error('Erro ao registrar treino:', err);
     }
@@ -595,27 +611,48 @@ export default function Dashboard({
       </div>
 
       {/* Grid de KPIs principais */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {/* KPI: Calorias */}
-        <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm space-y-2">
-          <div className="flex justify-between items-center text-zinc-500">
-            <span className="text-xs font-bold uppercase tracking-wide">{lang === 'pt' ? 'Calorias Reais' : 'Real Calories'}</span>
-            <Flame className="w-4 h-4 text-rose-500" />
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        {/* KPI: Calorias Líquidas */}
+        <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm space-y-2 col-span-1 md:col-span-2 flex flex-col justify-between">
+          <div>
+            <div className="flex justify-between items-center text-zinc-500">
+              <span className="text-xs font-bold uppercase tracking-wide">
+                {lang === 'pt' ? 'Balanço Calórico Líquido' : 'Net Calories'}
+              </span>
+              <Flame className="w-4 h-4 text-rose-500" />
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 py-1 text-center border-b border-zinc-100 dark:border-zinc-850 pb-2 mt-2">
+              <div>
+                <span className="text-[9px] text-zinc-400 uppercase font-black tracking-wider block">Alimentação</span>
+                <span className="font-mono text-base font-bold text-zinc-900 dark:text-zinc-50">{consumedCalories}</span>
+                <span className="text-[8px] text-zinc-400 font-bold block -mt-1">kcal</span>
+              </div>
+              <div>
+                <span className="text-[9px] text-zinc-405 uppercase font-black tracking-wider block">Exercício</span>
+                <span className="font-mono text-base font-bold text-emerald-500">- {workoutCaloriesToday}</span>
+                <span className="text-[8px] text-zinc-400 font-bold block -mt-1">kcal</span>
+              </div>
+              <div>
+                <span className="text-[9px] text-zinc-405 uppercase font-black tracking-wider block">Saldo Líquido</span>
+                <span className="font-mono text-base font-bold text-indigo-500">{netCalories}</span>
+                <span className="text-[8px] text-zinc-400 font-bold block -mt-1">/ {profile.targetCalories}</span>
+              </div>
+            </div>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="font-mono text-3xl font-bold text-zinc-900 dark:text-zinc-50">{consumedCalories}</span>
-            <span className="text-xs text-zinc-400 font-medium">/ {profile.targetCalories} kcal</span>
-          </div>
-          <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-            <div className="h-full bg-rose-500 rounded-full transition-all" style={{ width: `${caloriePercentage}%` }}></div>
-          </div>
-          <div className="text-[11px] font-semibold text-zinc-500 flex justify-between">
-            <span>{caloriePercentage}% {lang === 'pt' ? 'da meta' : 'of goal'}</span>
-            <span className={remainingCalories >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
-              {remainingCalories >= 0 
-                ? `${remainingCalories} ${lang === 'pt' ? 'kcal restantes' : 'kcal remaining'}` 
-                : `${Math.abs(remainingCalories)} ${lang === 'pt' ? 'kcal acima' : 'kcal over'}`}
-            </span>
+
+          <div className="space-y-1 mt-2">
+            <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all" style={{ width: `${caloriePercentage}%` }}></div>
+            </div>
+            <div className="text-[10px] font-semibold text-zinc-500 flex justify-between">
+              <span>{caloriePercentage}% {lang === 'pt' ? 'da meta' : 'of goal'}</span>
+              <span className={remainingCalories >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                {remainingCalories >= 0 
+                  ? `${remainingCalories} ${lang === 'pt' ? 'kcal livres' : 'kcal free'}` 
+                  : `${Math.abs(remainingCalories)} ${lang === 'pt' ? 'kcal acima' : 'kcal over'}`}
+              </span>
+            </div>
           </div>
         </div>
 

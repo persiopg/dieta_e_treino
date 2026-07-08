@@ -3,6 +3,154 @@ import { getPool } from '../config/db.js';
 import authMiddleware from '../middleware/auth.js';
 import { workoutPresets } from '../../src/data/workoutPresets.js';
 
+const exerciseDetailsMap = {
+  'Supino Reto com Barra': {
+    met: 4.5,
+    rationale: 'Exercício multiarticular de empurrar. Constrói a base de força do tronco superior.',
+    expected_result: 'Hipertrofia do peito, tríceps e ombro anterior.'
+  },
+  'Supino Inclinado com Halteres': {
+    met: 4.2,
+    rationale: 'Foca na porção superior do peitoral. O uso de halteres melhora a amplitude e simetria.',
+    expected_result: 'Desenvolvimento do peitoral superior e ombros.'
+  },
+  'Crucifixo Reto com Halteres': {
+    met: 3.5,
+    rationale: 'Exercício isolador que trabalha o peitoral em alongamento máximo sem fadigar o tríceps.',
+    expected_result: 'Definição e alongamento das fibras do peito.'
+  },
+  'Crossover na Polia': {
+    met: 3.2,
+    rationale: 'Mantém tensão constante no peitoral durante todo o movimento. Ótimo para finalização.',
+    expected_result: 'Isolamento e pump no peito inferior e medial.'
+  },
+  'Puxada Aberta no Pulley': {
+    met: 4.0,
+    rationale: 'Movimento de puxada vertical composto. Essencial para a largura das costas.',
+    expected_result: 'Fortalecimento do latíssimo do dorso e bíceps.'
+  },
+  'Remada Curvada com Barra': {
+    met: 4.5,
+    rationale: 'Movimento de puxada horizontal pesado. Desenvolve espessura e força na cadeia posterior.',
+    expected_result: 'Hipertrofia de costas médias, romboides e trapézio.'
+  },
+  'Remada Baixa Sentada': {
+    met: 3.8,
+    rationale: 'Remada com polia que permite excelente contração dos dorsais com menos fadiga lombar.',
+    expected_result: 'Espessura das costas e estabilização escapular.'
+  },
+  'Pull-down na Polia': {
+    met: 3.2,
+    rationale: 'Isola o latíssimo do dorso eliminando a ação do bíceps no movimento.',
+    expected_result: 'Trabalho focado na expansão dorsal ("asas").'
+  },
+  'Agachamento Livre com Barra': {
+    met: 6.0,
+    rationale: 'O rei dos exercícios de pernas. Composto pesado que recruta quase todo o corpo.',
+    expected_result: 'Desenvolvimento massivo de quadríceps, glúteos e estabilização do core.'
+  },
+  'Leg Press 45': {
+    met: 5.0,
+    rationale: 'Permite alto volume e carga para membros inferiores com menor compressão na coluna.',
+    expected_result: 'Hipertrofia de quadríceps e glúteos.'
+  },
+  'Cadeira Extensora': {
+    met: 3.5,
+    rationale: 'Exercício isolador de quadríceps que trabalha o músculo em contração máxima.',
+    expected_result: 'Isolamento e definição do quadríceps.'
+  },
+  'Cadeira Flexora': {
+    met: 3.5,
+    rationale: 'Isolador focado na flexão do joelho para treinar os posteriores de coxa.',
+    expected_result: 'Hipertrofia e prevenção de lesões nos posteriores de coxa.'
+  },
+  'Stiff com Halteres': {
+    met: 4.5,
+    rationale: 'Treina a extensão de quadril, enfatizando alongamento dos posteriores e glúteos.',
+    expected_result: 'Desenvolvimento da cadeia posterior, glúteos e lombar.'
+  },
+  'Elevação Pélvica': {
+    met: 4.5,
+    rationale: 'Melhor exercício isolador para glúteos com máxima ativação mecânica.',
+    expected_result: 'Hipertrofia e força direcionada nos glúteos.'
+  },
+  'Gêmeos Sentado (Panturrilha)': {
+    met: 3.0,
+    rationale: 'Foca no músculo sóleo da panturrilha com o joelho flexionado.',
+    expected_result: 'Desenvolvimento de volume e força no músculo sóleo.'
+  },
+  'Gêmeos em Pé': {
+    met: 3.0,
+    rationale: 'Foca no músculo gastrocnêmio com pernas totalmente estendidas.',
+    expected_result: 'Força e definição das panturrilhas.'
+  },
+  'Desenvolvimento com Halteres': {
+    met: 4.2,
+    rationale: 'Exercício composto de empurrar vertical. Constrói ombros largos e fortes.',
+    expected_result: 'Hipertrofia do deltoide anterior e lateral.'
+  },
+  'Elevação Lateral com Halteres': {
+    met: 3.2,
+    rationale: 'Isolador essencial para dar aspecto de ombros largos (V-taper).',
+    expected_result: 'Desenvolvimento do deltoide lateral.'
+  },
+  'Elevação Frontal na Polia': {
+    met: 3.2,
+    rationale: 'Isola o deltoide anterior fornecendo tensão mecânica contínua da polia.',
+    expected_result: 'Hipertrofia do deltoide frontal.'
+  },
+  'Crucifixo Invertido (Posterior)': {
+    met: 3.2,
+    rationale: 'Foco na porção posterior do ombro, auxiliando na postura e simetria.',
+    expected_result: 'Trabalho do deltoide posterior e trapézio.'
+  },
+  'Tríceps Pulley (Corda ou Barra)': {
+    met: 3.2,
+    rationale: 'Trabalho isolado de extensão de cotovelo na polia com excelente ativação de tríceps.',
+    expected_result: 'Hipertrofia do tríceps lateral e medial.'
+  },
+  'Tríceps Testa com Halteres': {
+    met: 3.5,
+    rationale: 'Exercício clássico de tríceps que enfatiza a cabeça longa do músculo.',
+    expected_result: 'Volume e força no tríceps posterior.'
+  },
+  'Rosca Direta com Barra W': {
+    met: 3.2,
+    rationale: 'Exercício construtor de bíceps clássico. A barra W reduz estresse nos punhos.',
+    expected_result: 'Volume e pico no bíceps.'
+  },
+  'Rosca Alternada com Halteres': {
+    met: 3.2,
+    rationale: 'Trabalha os bíceps de forma unilateral com supinação ativa do punho.',
+    expected_result: 'Simetria e pico do bíceps.'
+  },
+  'Rosca Martelo com Halteres': {
+    met: 3.2,
+    rationale: 'Foca no braquiorradial (antebraço) e braquial, dando espessura ao braço.',
+    expected_result: 'Força de pegada e volume nos antebraços e braços.'
+  },
+  'Prancha Isométrica': {
+    met: 3.0,
+    rationale: 'Estabilizador do core, fortalecendo a parede abdominal de forma estática e segura.',
+    expected_result: 'Fortalecimento da musculatura profunda do core e proteção lombar.'
+  },
+  'Abdominal Supra na Prancha': {
+    met: 3.0,
+    rationale: 'Foco na flexão da coluna para treinar o reto abdominal superior.',
+    expected_result: 'Hipertrofia e definição dos gomos do abdômen.'
+  },
+  'Abdominal Infra na Paralela': {
+    met: 3.0,
+    rationale: 'Foco na elevação de pernas/quadril para acionar a porção inferior do abdômen.',
+    expected_result: 'Fortalecimento do abdômen inferior e flexores do quadril.'
+  },
+  'Extensão Lombar (Banco Romano)': {
+    met: 3.2,
+    rationale: 'Fortalece os eretores da espinha, promovendo melhor postura e proteção à coluna.',
+    expected_result: 'Força lombar e prevenção de dores nas costas.'
+  }
+};
+
 const router = express.Router();
 
 // Helper para obter o nome e descrição do treino baseado no cadastro
@@ -43,7 +191,7 @@ router.get('/', authMiddleware, async (req, res) => {
     const daysWithExercises = [];
     for (const day of days) {
       const [exercises] = await pool.query(
-        'SELECT id, name, sets, reps, rest, weight FROM workout_exercises WHERE workout_day_id = ? ORDER BY id ASC',
+        'SELECT id, name, sets, reps, rest, weight, rationale, expected_result, met FROM workout_exercises WHERE workout_day_id = ? ORDER BY id ASC',
         [day.id]
       );
 
@@ -53,7 +201,10 @@ router.get('/', authMiddleware, async (req, res) => {
         sets: Number(ex.sets),
         reps: ex.reps,
         rest: Number(ex.rest),
-        weight: Number(ex.weight)
+        weight: Number(ex.weight),
+        rationale: ex.rationale,
+        expected_result: ex.expected_result,
+        met: ex.met ? Number(ex.met) : 3.5
       }));
 
       daysWithExercises.push({
@@ -103,16 +254,25 @@ router.post('/preset', authMiddleware, async (req, res) => {
 
       if (day.exercises && day.exercises.length > 0) {
         for (const ex of day.exercises) {
+          const details = exerciseDetailsMap[ex.name] || {
+            met: 3.5,
+            rationale: 'Exercício complementar para rotina semanal.',
+            expected_result: 'Ganho de força e tônus muscular geral.'
+          };
+
           await conn.query(
-            `INSERT INTO workout_exercises (workout_day_id, name, sets, reps, rest, weight) 
-             VALUES (?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO workout_exercises (workout_day_id, name, sets, reps, rest, weight, rationale, expected_result, met) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               dayId,
               ex.name,
               ex.sets,
               ex.reps,
               ex.rest,
-              ex.weight || 0
+              ex.weight || 0,
+              details.rationale,
+              details.expected_result,
+              details.met
             ]
           );
         }
@@ -200,16 +360,25 @@ router.post('/day/:id/exercise', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Não autorizado ou dia de treino não encontrado.' });
     }
 
+    const details = exerciseDetailsMap[name] || {
+      met: 3.5,
+      rationale: 'Exercício complementar adicionado manualmente.',
+      expected_result: 'Ganho de força e tônus muscular geral.'
+    };
+
     const [result] = await pool.query(
-      `INSERT INTO workout_exercises (workout_day_id, name, sets, reps, rest, weight) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO workout_exercises (workout_day_id, name, sets, reps, rest, weight, rationale, expected_result, met) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         dayId,
         name,
         sets,
         reps,
         rest,
-        weight || 0
+        weight || 0,
+        details.rationale,
+        details.expected_result,
+        details.met
       ]
     );
 
@@ -219,7 +388,10 @@ router.post('/day/:id/exercise', authMiddleware, async (req, res) => {
       sets: Number(sets),
       reps,
       rest: Number(rest),
-      weight: Number(weight || 0)
+      weight: Number(weight || 0),
+      rationale: details.rationale,
+      expected_result: details.expected_result,
+      met: Number(details.met)
     });
   } catch (error) {
     console.error(error);
@@ -260,6 +432,21 @@ router.put('/day/:dayId/exercise/:exerciseId', authMiddleware, async (req, res) 
     if (name !== undefined) {
       fields.push('name = ?');
       params.push(name);
+
+      const details = exerciseDetailsMap[name] || {
+        met: 3.5,
+        rationale: 'Exercício complementar atualizado manualmente.',
+        expected_result: 'Ganho de força e tônus muscular geral.'
+      };
+
+      fields.push('met = ?');
+      params.push(details.met);
+
+      fields.push('rationale = ?');
+      params.push(details.rationale);
+
+      fields.push('expected_result = ?');
+      params.push(details.expected_result);
     }
     if (sets !== undefined) {
       fields.push('sets = ?');

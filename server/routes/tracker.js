@@ -131,14 +131,22 @@ router.get('/workout-done', authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
     const [rows] = await pool.query(
-      'SELECT workout_day_name FROM workout_logs WHERE user_id = ? AND logged_date = ?',
+      'SELECT workout_day_name, duration_minutes, calories_burned FROM workout_logs WHERE user_id = ? AND logged_date = ?',
       [req.userId, date]
     );
 
     const isDone = rows.length > 0;
     const dayName = isDone ? rows[0].workout_day_name : null;
+    const duration = isDone ? Number(rows[0].duration_minutes || 45) : 0;
+    const calories = isDone ? Number(rows[0].calories_burned || 0) : 0;
 
-    res.json({ date, isDone, workout_day_name: dayName });
+    res.json({ 
+      date, 
+      isDone, 
+      workout_day_name: dayName, 
+      duration_minutes: duration, 
+      calories_burned: calories 
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Erro ao verificar conclusão de treino.' });
@@ -148,20 +156,58 @@ router.get('/workout-done', authMiddleware, async (req, res) => {
 // @route   POST /api/tracker/workout-done
 // @desc    Registrar treino do dia como concluído
 router.post('/workout-done', authMiddleware, async (req, res) => {
-  const { workout_day_name, date, isDone } = req.body;
+  const { workout_day_name, date, isDone, duration_minutes } = req.body;
   const targetDate = date || getTodayString();
 
   try {
     const pool = getPool();
     
     if (isDone) {
+      // 1. Obter o peso do usuário
+      const [userRows] = await pool.query('SELECT weight FROM users WHERE id = ?', [req.userId]);
+      const weight = userRows.length > 0 ? Number(userRows[0].weight || 80) : 80;
+
+      // 2. Determinar o MET do treino
+      let met = 4.5;
+      if (workout_day_name && workout_day_name.toLowerCase().includes('cardio')) {
+        met = 7.5;
+      } else {
+        // Obter os exercícios dessa ficha para tirar a média de METs
+        const [dayRows] = await pool.query(
+          'SELECT id FROM workout_days WHERE user_id = ? AND name = ?',
+          [req.userId, workout_day_name]
+        );
+        if (dayRows.length > 0) {
+          const [exRows] = await pool.query(
+            'SELECT AVG(met) as avg_met FROM workout_exercises WHERE workout_day_id = ?',
+            [dayRows[0].id]
+          );
+          if (exRows.length > 0 && exRows[0].avg_met) {
+            met = Number(exRows[0].avg_met);
+          }
+        }
+      }
+
+      // 3. Calcular calorias gastas via MET
+      const duration = Number(duration_minutes || 60);
+      const caloriesBurned = Math.round(met * weight * (duration / 60));
+
       await pool.query(
-        `INSERT INTO workout_logs (user_id, workout_day_name, logged_date) 
-         VALUES (?, ?, ?) 
-         ON DUPLICATE KEY UPDATE workout_day_name = VALUES(workout_day_name)`,
-        [req.userId, workout_day_name || 'Treino Concluído', targetDate]
+        `INSERT INTO workout_logs (user_id, workout_day_name, logged_date, duration_minutes, calories_burned) 
+         VALUES (?, ?, ?, ?, ?) 
+         ON DUPLICATE KEY UPDATE 
+           workout_day_name = VALUES(workout_day_name),
+           duration_minutes = VALUES(duration_minutes),
+           calories_burned = VALUES(calories_burned)`,
+        [req.userId, workout_day_name || 'Treino Concluído', targetDate, duration, caloriesBurned]
       );
-      res.json({ message: 'Treino registrado como concluído.', isDone: true, date: targetDate });
+      res.json({ 
+        message: 'Treino registrado como concluído.', 
+        isDone: true, 
+        date: targetDate, 
+        duration_minutes: duration,
+        calories_burned: caloriesBurned
+      });
     } else {
       // Se isDone for falso, removemos o registro
       await pool.query(
@@ -198,7 +244,7 @@ router.get('/workout/history', authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
     const [rows] = await pool.query(
-      'SELECT workout_day_name, logged_date FROM workout_logs WHERE user_id = ? ORDER BY logged_date DESC LIMIT 90',
+      'SELECT workout_day_name, logged_date, duration_minutes, calories_burned FROM workout_logs WHERE user_id = ? ORDER BY logged_date DESC LIMIT 90',
       [req.userId]
     );
     res.json(rows);
