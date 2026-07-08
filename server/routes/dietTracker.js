@@ -207,6 +207,9 @@ router.post('/copy-plan', authMiddleware, async (req, res) => {
       );
 
       for (const item of items) {
+        const qty = Number(item.quantity) || 100;
+        const factor = qty / 100;
+
         await pool.query(
           `INSERT INTO diet_logs (user_id, meal_name, food_name, quantity, protein, carbs, fat, calories, logged_date) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
@@ -214,11 +217,11 @@ router.post('/copy-plan', authMiddleware, async (req, res) => {
             req.userId,
             meal.name,
             item.name,
-            Number(item.quantity),
-            Number(item.protein),
-            Number(item.carbs),
-            Number(item.fat),
-            Math.round(item.calories),
+            qty,
+            Number((Number(item.protein) * factor).toFixed(1)),
+            Number((Number(item.carbs) * factor).toFixed(1)),
+            Number((Number(item.fat) * factor).toFixed(1)),
+            Math.round(Number(item.calories) * factor),
             targetDate
           ]
         );

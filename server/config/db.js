@@ -193,6 +193,12 @@ async function createTables() {
 
   // Migrações de colunas adicionais para Treinos Inteligentes e MET
   try {
+    await pool.query("ALTER TABLE users ADD COLUMN use_whey BOOLEAN DEFAULT TRUE");
+  } catch (e) {}
+  try {
+    await pool.query("ALTER TABLE users ADD COLUMN meals_per_day INT DEFAULT 4");
+  } catch (e) {}
+  try {
     await pool.query("ALTER TABLE workout_exercises ADD COLUMN rationale TEXT");
   } catch (e) {}
   try {
@@ -296,6 +302,16 @@ async function seedFoodsTableIfNeeded() {
       const query = 'INSERT INTO foods (name, calories, protein, carbs, fat, serving_size, category) VALUES ?';
       await pool.query(query, [foodsToInsert]);
       console.log(`Sucesso: ${foodsToInsert.length} alimentos da TACO cadastrados no MySQL.`);
+    }
+
+    // Garantir que o Whey Protein exista no banco para pesquisas no diário
+    const [wheyCheck] = await pool.query("SELECT id FROM foods WHERE name = 'Whey Protein'");
+    if (wheyCheck.length === 0) {
+      await pool.query(
+        "INSERT INTO foods (name, calories, protein, carbs, fat, serving_size, category) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ['Whey Protein', 360, 75.0, 10.0, 2.0, '100g', 'Suplementos']
+      );
+      console.log('Whey Protein semeado com sucesso no banco de dados.');
     }
   } catch (error) {
     console.error('Erro ao popular a tabela de alimentos (seed):', error);

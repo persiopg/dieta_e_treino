@@ -25,7 +25,9 @@ function mapUserToClient(user) {
       protein: user.protein_target || 0,
       carbs: user.carbs_target || 0,
       fat: user.fat_target || 0
-    }
+    },
+    useWhey: user.use_whey !== 0,
+    mealsPerDay: user.meals_per_day || 4
   };
 }
 
@@ -156,7 +158,9 @@ router.put('/profile', authMiddleware, async (req, res) => {
     bmr, 
     tdee, 
     targetCalories, 
-    macros 
+    macros,
+    useWhey,
+    mealsPerDay
   } = req.body;
 
   try {
@@ -176,7 +180,9 @@ router.put('/profile', authMiddleware, async (req, res) => {
         target_calories = ?, 
         protein_target = ?, 
         carbs_target = ?, 
-        fat_target = ? 
+        fat_target = ?,
+        use_whey = ?,
+        meals_per_day = ?
       WHERE id = ?`,
       [
         gender,
@@ -192,6 +198,8 @@ router.put('/profile', authMiddleware, async (req, res) => {
         macros?.protein || 0,
         macros?.carbs || 0,
         macros?.fat || 0,
+        useWhey !== undefined ? (useWhey ? 1 : 0) : 1,
+        mealsPerDay !== undefined ? mealsPerDay : 4,
         req.userId
       ]
     );

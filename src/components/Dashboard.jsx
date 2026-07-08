@@ -515,10 +515,19 @@ export default function Dashboard({
     }
   };
 
-  // Agrupamento dos itens de diário alimentar por refeição
-  const mealsStructure = ['Café da Manhã', 'Almoço', 'Lanche', 'Jantar'];
-  const groupedDietLogs = {};
+  // Agrupamento dos itens de diário alimentar por refeição baseado no perfil do usuário
+  const mealsPerDay = profile?.mealsPerDay || 4;
+  let mealsStructure = ['Café da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar'];
   
+  if (mealsPerDay === 3) {
+    mealsStructure = ['Café da Manhã', 'Almoço', 'Jantar'];
+  } else if (mealsPerDay === 5) {
+    mealsStructure = ['Café da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar', 'Ceia'];
+  } else if (mealsPerDay === 6) {
+    mealsStructure = ['Café da Manhã', 'Lanche da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar', 'Ceia'];
+  }
+
+  const groupedDietLogs = {};
   mealsStructure.forEach(meal => {
     groupedDietLogs[meal] = dietLogs.filter(log => log.meal_name === meal);
   });
@@ -872,105 +881,122 @@ export default function Dashboard({
                 </button>
               </div>
             ) : (
-              mealsStructure.map((mealName) => {
-                const logs = groupedDietLogs[mealName] || [];
-                let mealCal = 0;
-                logs.forEach(l => mealCal += Math.round(Number(l.calories)));
+              (() => {
+                const activeMealsList = [...mealsStructure];
+                dietLogs.forEach(log => {
+                  if (!activeMealsList.includes(log.meal_name)) {
+                    activeMealsList.push(log.meal_name);
+                  }
+                });
 
-                return (
-                  <div key={mealName} className="border border-zinc-100 dark:border-zinc-800/80 rounded-2xl overflow-hidden shadow-sm bg-zinc-50/10 dark:bg-transparent">
-                    {/* Header da Refeição no diário */}
-                    <div className="px-4 py-3 bg-zinc-50 dark:bg-[#121216] border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center">
-                      <div>
-                        <span className="font-extrabold text-sm text-zinc-900 dark:text-zinc-100">{mealName}</span>
-                        <span className="text-[10px] text-zinc-400 font-medium ml-2">({logs.length} {lang === 'pt' ? 'itens' : 'items'})</span>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className="font-mono font-bold text-xs text-zinc-900 dark:text-zinc-100">{mealCal} kcal</span>
-                        <button
-                          onClick={() => setSelectedMealForAdd(mealName)}
-                          className="p-1 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all"
-                          title={lang === 'pt' ? 'Adicionar Alimento' : 'Add Food'}
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
+                return activeMealsList.map((mealName) => {
+                  const logs = groupedDietLogs[mealName] || [];
+                  let mealCal = 0;
+                  logs.forEach(l => mealCal += Math.round(Number(l.calories)));
 
-                    {/* Itens da Refeição no diário */}
-                    <div className="p-4 space-y-3">
-                      {logs.length === 0 ? (
-                        <p className="text-xs text-zinc-400 italic py-1">{lang === 'pt' ? 'Nenhum alimento registrado nesta refeição.' : 'No foods logged for this meal.'}</p>
-                      ) : (
-                        <div className="space-y-3.5">
-                          {logs.map((item) => (
-                            <div key={item.id} className="flex justify-between items-start gap-4 pb-3 border-b border-zinc-100 dark:border-zinc-900 last:border-0 last:pb-0">
-                              <div className="space-y-0.5">
-                                <span className="font-semibold text-xs text-zinc-800 dark:text-zinc-200">{item.food_name}</span>
-                                <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-0.5">
-                                  <span>P: {Math.round(item.protein)}g</span>
-                                  <span>•</span>
-                                  <span>C: {Math.round(item.carbs)}g</span>
-                                  <span>•</span>
-                                  <span>G: {Math.round(item.fat)}g</span>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-3.5">
-                                <span className="font-mono font-extrabold text-xs text-zinc-900 dark:text-zinc-100">{Math.round(item.calories)} kcal</span>
-                                
-                                {/* Controles de ajuste rápido (+/-) */}
-                                <div className="flex items-center border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-white dark:bg-zinc-900">
-                                  <button
-                                    onClick={() => handleAdjustLogQuantity(item, 'decrement')}
-                                    className="px-2.5 py-1 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-extrabold cursor-pointer"
-                                  >
-                                    -
-                                  </button>
-                                  <button
-                                     onClick={() => handleEditLogQuantityDirectly(item)}
-                                     className="px-2.5 py-1 text-[10px] font-bold text-zinc-700 dark:text-zinc-300 border-x border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-500 transition-colors cursor-pointer"
-                                     title={lang === 'pt' ? 'Clique para alterar a quantidade' : 'Click to edit quantity'}
-                                   >
-                                     {Number(item.quantity).toFixed(0)}g
-                                   </button>
-                                  <button
-                                    onClick={() => handleAdjustLogQuantity(item, 'increment')}
-                                    className="px-2.5 py-1 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-extrabold cursor-pointer"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-
-                                <button
-                                  onClick={() => {
-                                    setSubstitutingItem(item);
-                                    setSubstituteSearchTerm('');
-                                    setSelectedSubstituteFood(null);
-                                    setSelectedMealForAdd(null);
-                                  }}
-                                  className="text-zinc-400 hover:text-indigo-500 p-1"
-                                  title={lang === 'pt' ? 'Trocar por Equivalente' : 'Swap for Equivalent'}
-                                >
-                                  <RefreshCw className="w-3.5 h-3.5" />
-                                </button>
-
-                                <button
-                                  onClick={() => handleDeleteLogItem(item.id)}
-                                  className="text-zinc-400 hover:text-rose-500 p-1"
-                                  title="Remover"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
+                  return (
+                    <div key={mealName} className="border border-zinc-100 dark:border-zinc-800/80 rounded-2xl overflow-hidden shadow-sm bg-zinc-50/10 dark:bg-transparent">
+                      {/* Header da Refeição no diário */}
+                      <div className="px-4 py-3 bg-zinc-50 dark:bg-[#121216] border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center">
+                        <div>
+                          <span className="font-extrabold text-sm text-zinc-900 dark:text-zinc-100">{mealName}</span>
+                          <span className="text-[10px] text-zinc-400 font-medium ml-2">({logs.length} {lang === 'pt' ? 'itens' : 'items'})</span>
                         </div>
-                      )}
+                        <div className="flex items-center gap-4">
+                          <span className="font-mono font-bold text-xs text-zinc-900 dark:text-zinc-100">{mealCal} kcal</span>
+                          <button
+                            onClick={() => setSelectedMealForAdd(mealName)}
+                            className="p-1 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all"
+                            title={lang === 'pt' ? 'Adicionar Alimento' : 'Add Food'}
+                          >
+                            <Plus className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Itens da Refeição no diário */}
+                      <div className="p-4 space-y-3">
+                        {logs.length === 0 ? (
+                          <p className="text-xs text-zinc-400 italic py-1">{lang === 'pt' ? 'Nenhum alimento registrado nesta refeição.' : 'No foods logged for this meal.'}</p>
+                        ) : (
+                          <div className="space-y-3.5">
+                            {logs.map((item) => (
+                              <div key={item.id} className="flex justify-between items-start gap-4 pb-3 border-b border-zinc-100 dark:border-zinc-900 last:border-0 last:pb-0">
+                                <div className="space-y-0.5">
+                                  <span className="font-semibold text-xs text-zinc-800 dark:text-zinc-200">{item.food_name}</span>
+                                  <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-0.5">
+                                    {item.food_name?.toLowerCase().includes('ovo') && (
+                                      <>
+                                        <span className="font-bold text-blue-500 dark:text-blue-400">
+                                          ~{(Number(item.quantity) / 50).toFixed(1).replace('.0', '')} {lang === 'pt' ? 'unid' : 'units'}
+                                        </span>
+                                        <span>•</span>
+                                      </>
+                                    )}
+                                    <span>P: {Math.round(item.protein)}g</span>
+                                    <span>•</span>
+                                    <span>C: {Math.round(item.carbs)}g</span>
+                                    <span>•</span>
+                                    <span>G: {Math.round(item.fat)}g</span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-3.5">
+                                  <span className="font-mono font-extrabold text-xs text-zinc-900 dark:text-zinc-100">{Math.round(item.calories)} kcal</span>
+                                  
+                                  {/* Controles de ajuste rápido (+/-) */}
+                                  <div className="flex items-center border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-white dark:bg-zinc-900">
+                                    <button
+                                      onClick={() => handleAdjustLogQuantity(item, 'decrement')}
+                                      className="px-2.5 py-1 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-extrabold cursor-pointer"
+                                    >
+                                      -
+                                    </button>
+                                    <button
+                                       onClick={() => handleEditLogQuantityDirectly(item)}
+                                       className="px-2.5 py-1 text-[10px] font-bold text-zinc-700 dark:text-zinc-300 border-x border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-500 transition-colors cursor-pointer"
+                                       title={lang === 'pt' ? 'Clique para alterar a quantidade' : 'Click to edit quantity'}
+                                     >
+                                       {Number(item.quantity).toFixed(0)}g
+                                     </button>
+                                    <button
+                                      onClick={() => handleAdjustLogQuantity(item, 'increment')}
+                                      className="px-2.5 py-1 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-extrabold cursor-pointer"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+
+                                  <button
+                                    onClick={() => {
+                                      setSubstitutingItem(item);
+                                      setSubstituteSearchTerm('');
+                                      setSelectedSubstituteFood(null);
+                                      setSelectedMealForAdd(null);
+                                    }}
+                                    className="text-zinc-400 hover:text-indigo-500 p-1"
+                                    title={lang === 'pt' ? 'Trocar por Equivalente' : 'Swap for Equivalent'}
+                                  >
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleDeleteLogItem(item.id)}
+                                    className="text-zinc-400 hover:text-rose-500 p-1"
+                                    title="Remover"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })
+                  );
+                });
+              })()
             )}
           </div>
 

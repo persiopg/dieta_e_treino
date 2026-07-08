@@ -80,7 +80,7 @@ router.get('/', authMiddleware, async (req, res) => {
 // @route   POST /api/diet/preset
 // @desc    Gerar um plano de dieta dinâmico baseado nos cálculos e metas de macros do usuário (TACO)
 router.post('/preset', authMiddleware, async (req, res) => {
-  const { presetKey } = req.body; // 'emagrecimento', 'manutencao', 'hipertrofia'
+  const { presetKey, useWhey: bodyUseWhey, mealsPerDay: bodyMealsPerDay } = req.body;
 
   const conn = await getPool().getConnection();
   try {
@@ -89,7 +89,7 @@ router.post('/preset', authMiddleware, async (req, res) => {
     // 1. Obter os dados do usuário para os cálculos
     const [userRows] = await conn.query(
       `SELECT gender, age, weight, height, activity_level, target_calories, 
-              protein_target, carbs_target, fat_target, goal 
+              protein_target, carbs_target, fat_target, goal, use_whey, meals_per_day 
        FROM users WHERE id = ?`,
       [req.userId]
     );
@@ -105,6 +105,16 @@ router.post('/preset', authMiddleware, async (req, res) => {
     const gender = user.gender || 'masculino';
     const activityLevel = user.activity_level || 'moderado';
     const goal = presetKey || user.goal || 'emagrecimento';
+
+    // Determinar preferências de whey e refeições
+    const useWhey = bodyUseWhey !== undefined ? !!bodyUseWhey : (user.use_whey !== 0);
+    const mealsPerDay = Number(bodyMealsPerDay !== undefined ? bodyMealsPerDay : (user.meals_per_day || 4));
+
+    // Salvar preferências no perfil do usuário no banco
+    await conn.query(
+      'UPDATE users SET use_whey = ?, meals_per_day = ? WHERE id = ?',
+      [useWhey ? 1 : 0, mealsPerDay, req.userId]
+    );
 
     // 2. Calcular ou obter targetCalories e macros
     let targetCalories = Number(user.target_calories);
@@ -202,212 +212,507 @@ router.post('/preset', authMiddleware, async (req, res) => {
     const batataData = getFoodData('Batata, doce, cozida', { calories: 77, protein: 0.6, carbs: 18.4, fat: 0.1 });
     const wheyData = { calories: 360, protein: 75.0, carbs: 10.0, fat: 2.0 };
 
-    // 4. Executar os Cálculos Heurísticos de Porções baseados nos macros alvo diários
-    // Distribuição dos macros alvos nas 4 refeições:
-    // Café da Manhã: 20% | Almoço: 35% | Lanche da Tarde: 15% | Jantar: 30%
-    const mealP = {
-      cafe: { prot: proteinTarget * 0.20, carbs: carbsTarget * 0.20, fat: fatTarget * 0.20 },
-      almoco: { prot: proteinTarget * 0.35, carbs: carbsTarget * 0.35, fat: fatTarget * 0.35 },
-      lanche: { prot: proteinTarget * 0.15, carbs: carbsTarget * 0.15, fat: fatTarget * 0.15 },
-      jantar: { prot: proteinTarget * 0.30, carbs: carbsTarget * 0.30, fat: fatTarget * 0.30 }
-    };
+    // 4. Executar os Cálculos de Porções Dinâmicas por Refeições e Whey
+    let mealsDefs = [];
+    if (mealsPerDay === 3) {
+      mealsDefs = [
+        { name: 'Café da Manhã', pctProt: 0.30, pctCarbs: 0.30, pctFat: 0.30 },
+        { name: 'Almoço', pctProt: 0.40, pctCarbs: 0.40, pctFat: 0.40 },
+        { name: 'Jantar', pctProt: 0.30, pctCarbs: 0.30, pctFat: 0.30 }
+      ];
+    } else if (mealsPerDay === 5) {
+      mealsDefs = [
+        { name: 'Café da Manhã', pctProt: 0.20, pctCarbs: 0.20, pctFat: 0.20 },
+        { name: 'Almoço', pctProt: 0.30, pctCarbs: 0.30, pctFat: 0.30 },
+        { name: 'Lanche da Tarde', pctProt: 0.15, pctCarbs: 0.15, pctFat: 0.15 },
+        { name: 'Jantar', pctProt: 0.25, pctCarbs: 0.25, pctFat: 0.25 },
+        { name: 'Ceia', pctProt: 0.10, pctCarbs: 0.10, pctFat: 0.10 }
+      ];
+    } else if (mealsPerDay === 6) {
+      mealsDefs = [
+        { name: 'Café da Manhã', pctProt: 0.15, pctCarbs: 0.15, pctFat: 0.15 },
+        { name: 'Lanche da Manhã', pctProt: 0.10, pctCarbs: 0.10, pctFat: 0.10 },
+        { name: 'Almoço', pctProt: 0.30, pctCarbs: 0.30, pctFat: 0.30 },
+        { name: 'Lanche da Tarde', pctProt: 0.15, pctCarbs: 0.15, pctFat: 0.15 },
+        { name: 'Jantar', pctProt: 0.20, pctCarbs: 0.20, pctFat: 0.20 },
+        { name: 'Ceia', pctProt: 0.10, pctCarbs: 0.10, pctFat: 0.10 }
+      ];
+    } else {
+      // 4 refeições (padrão)
+      mealsDefs = [
+        { name: 'Café da Manhã', pctProt: 0.20, pctCarbs: 0.20, pctFat: 0.20 },
+        { name: 'Almoço', pctProt: 0.35, pctCarbs: 0.35, pctFat: 0.35 },
+        { name: 'Lanche da Tarde', pctProt: 0.15, pctCarbs: 0.15, pctFat: 0.15 },
+        { name: 'Jantar', pctProt: 0.30, pctCarbs: 0.30, pctFat: 0.30 }
+      ];
+    }
 
     const mealsResult = [];
 
-    // --- Café da Manhã (20%) ---
-    const cafeOvoQty = Math.round(Math.max(50, (mealP.cafe.prot / ovoData.protein) * 100));
-    const cafePaoQty = Math.round(Math.max(25, (mealP.cafe.carbs / paoData.carbs) * 100));
+    for (const def of mealsDefs) {
+      const targetProt = proteinTarget * def.pctProt;
+      const targetCarbs = carbsTarget * def.pctCarbs;
+      const targetFat = fatTarget * def.pctFat;
+      const items = [];
 
-    mealsResult.push({
-      name: 'Café da Manhã',
-      items: [
-        {
-          name: 'Ovo, de galinha, inteiro, cozido/10minutos',
-          quantity: cafeOvoQty,
-          protein: Number(((ovoData.protein * cafeOvoQty) / 100).toFixed(1)),
-          carbs: Number(((ovoData.carbs * cafeOvoQty) / 100).toFixed(1)),
-          fat: Number(((ovoData.fat * cafeOvoQty) / 100).toFixed(1)),
-          calories: Math.round((ovoData.calories * cafeOvoQty) / 100)
-        },
-        {
-          name: 'Pão, trigo, forma, integral',
-          quantity: cafePaoQty,
-          protein: Number(((paoData.protein * cafePaoQty) / 100).toFixed(1)),
-          carbs: Number(((paoData.carbs * cafePaoQty) / 100).toFixed(1)),
-          fat: Number(((paoData.fat * cafePaoQty) / 100).toFixed(1)),
-          calories: Math.round((paoData.calories * cafePaoQty) / 100)
+      if (def.name === 'Café da Manhã') {
+        let cafeOvoQty = 100; // 2 ovos inteiros
+        let cafeWheyQty = 0;
+
+        if (!useWhey) {
+          // Sem Whey, aumentamos ovo cozido até o máximo de 3 ovos (150g)
+          cafeOvoQty = Math.min(150, Math.round((targetProt / ovoData.protein) * 100));
+        } else {
+          const eggProt = (ovoData.protein * cafeOvoQty) / 100;
+          const remainingProt = targetProt - eggProt;
+          if (remainingProt > 5) {
+            cafeWheyQty = Math.round((remainingProt / wheyData.protein) * 100);
+          } else if (remainingProt < 0) {
+            cafeOvoQty = Math.max(50, Math.round((targetProt / ovoData.protein) * 100));
+          }
         }
-      ]
-    });
 
-    // --- Almoço (35%) ---
-    const feijaoQty = 80;
-    const feijaoP = (feijaoData.protein * feijaoQty) / 100;
-    const feijaoC = (feijaoData.carbs * feijaoQty) / 100;
-    const feijaoF = (feijaoData.fat * feijaoQty) / 100;
+        let cafePaoQty = Math.round((targetCarbs / paoData.carbs) * 100);
+        let cafeBananaQty = 0;
 
-    const almocoProtData = goal === 'emagrecimento' ? frangoData : patinhoData;
-    const almocoProtName = goal === 'emagrecimento' ? 'Frango, peito, sem pele, grelhado' : 'Carne, bovina, patinho, sem gordura, grelhado';
-    
-    const remainingAlmocoProt = Math.max(10, mealP.almoco.prot - feijaoP);
-    const almocoProtQty = Math.round((remainingAlmocoProt / almocoProtData.protein) * 100);
+        if (cafePaoQty > 75) {
+          const excessCarbs = targetCarbs - ((paoData.carbs * 75) / 100);
+          cafePaoQty = 75;
+          cafeBananaQty = Math.round((excessCarbs / bananaData.carbs) * 100);
+        }
 
-    const remainingAlmocoCarbs = Math.max(10, mealP.almoco.carbs - feijaoC);
-    const almocoArrozQty = Math.round((remainingAlmocoCarbs / arrozData.carbs) * 100);
+        if (cafeOvoQty > 0) {
+          items.push({
+            name: 'Ovo, de galinha, inteiro, cozido/10minutos',
+            quantity: cafeOvoQty,
+            protein: Number(((ovoData.protein * cafeOvoQty) / 100).toFixed(1)),
+            carbs: Number(((ovoData.carbs * cafeOvoQty) / 100).toFixed(1)),
+            fat: Number(((ovoData.fat * cafeOvoQty) / 100).toFixed(1)),
+            calories: Math.round((ovoData.calories * cafeOvoQty) / 100)
+          });
+        }
 
-    const currentAlmocoFat = feijaoF + ((almocoProtData.fat * almocoProtQty) / 100) + ((arrozData.fat * almocoArrozQty) / 100);
-    const remainingAlmocoFat = Math.max(0, mealP.almoco.fat - currentAlmocoFat);
-    const almocoAzeiteQty = Math.round((remainingAlmocoFat / azeiteData.fat) * 100);
+        if (cafeWheyQty > 0) {
+          items.push({
+            name: 'Whey Protein',
+            quantity: cafeWheyQty,
+            protein: Number(((wheyData.protein * cafeWheyQty) / 100).toFixed(1)),
+            carbs: Number(((wheyData.carbs * cafeWheyQty) / 100).toFixed(1)),
+            fat: Number(((wheyData.fat * cafeWheyQty) / 100).toFixed(1)),
+            calories: Math.round((wheyData.calories * cafeWheyQty) / 100)
+          });
+        }
 
-    const almocoItems = [
-      {
-        name: almocoProtName,
-        quantity: almocoProtQty,
-        protein: Number(((almocoProtData.protein * almocoProtQty) / 100).toFixed(1)),
-        carbs: Number(((almocoProtData.carbs * almocoProtQty) / 100).toFixed(1)),
-        fat: Number(((almocoProtData.fat * almocoProtQty) / 100).toFixed(1)),
-        calories: Math.round((almocoProtData.calories * almocoProtQty) / 100)
-      },
-      {
-        name: 'Arroz, integral, cozido',
-        quantity: almocoArrozQty,
-        protein: Number(((arrozData.protein * almocoArrozQty) / 100).toFixed(1)),
-        carbs: Number(((arrozData.carbs * almocoArrozQty) / 100).toFixed(1)),
-        fat: Number(((arrozData.fat * arrozData.fat) / 100).toFixed(1)),
-        calories: Math.round((arrozData.calories * almocoArrozQty) / 100)
-      },
-      {
-        name: 'Feijão, carioca, cozido',
-        quantity: feijaoQty,
-        protein: Number(feijaoP.toFixed(1)),
-        carbs: Number(feijaoC.toFixed(1)),
-        fat: Number(feijaoF.toFixed(1)),
-        calories: Math.round((feijaoData.calories * feijaoQty) / 100)
+        if (cafePaoQty > 0) {
+          items.push({
+            name: 'Pão, trigo, forma, integral',
+            quantity: cafePaoQty,
+            protein: Number(((paoData.protein * cafePaoQty) / 100).toFixed(1)),
+            carbs: Number(((paoData.carbs * cafePaoQty) / 100).toFixed(1)),
+            fat: Number(((paoData.fat * cafePaoQty) / 100).toFixed(1)),
+            calories: Math.round((paoData.calories * cafePaoQty) / 100)
+          });
+        }
+
+        if (cafeBananaQty >= 30) {
+          items.push({
+            name: 'Banana, prata, crua',
+            quantity: cafeBananaQty,
+            protein: Number(((bananaData.protein * cafeBananaQty) / 100).toFixed(1)),
+            carbs: Number(((bananaData.carbs * cafeBananaQty) / 100).toFixed(1)),
+            fat: Number(((bananaData.fat * cafeBananaQty) / 100).toFixed(1)),
+            calories: Math.round((bananaData.calories * cafeBananaQty) / 100)
+          });
+        }
+      } 
+      else if (def.name === 'Lanche da Manhã') {
+        const iogurteQty = 150;
+        let lancheMProtQty = 0;
+        
+        if (useWhey) {
+          const yogProt = (iogurteData.protein * iogurteQty) / 100;
+          const remainingProt = targetProt - yogProt;
+          if (remainingProt > 5) {
+            lancheMProtQty = Math.round((remainingProt / wheyData.protein) * 100);
+          }
+        }
+
+        const bananaQty = 100;
+        const carbsFromYogAndBanana = ((iogurteData.carbs * iogurteQty) / 100) + bananaQty * 0.26;
+        const remainingCarbs = Math.max(0, targetCarbs - carbsFromYogAndBanana);
+        const paoQty = Math.round((remainingCarbs / paoData.carbs) * 100);
+
+        items.push({
+          name: 'Iogurte, natural, desnatado',
+          quantity: iogurteQty,
+          protein: Number(((iogurteData.protein * iogurteQty) / 100).toFixed(1)),
+          carbs: Number(((iogurteData.carbs * iogurteQty) / 100).toFixed(1)),
+          fat: Number(((iogurteData.fat * iogurteQty) / 100).toFixed(1)),
+          calories: Math.round((iogurteData.calories * iogurteQty) / 100)
+        });
+
+        if (lancheMProtQty > 0) {
+          items.push({
+            name: 'Whey Protein',
+            quantity: lancheMProtQty,
+            protein: Number(((wheyData.protein * lancheMProtQty) / 100).toFixed(1)),
+            carbs: Number(((wheyData.carbs * lancheMProtQty) / 100).toFixed(1)),
+            fat: Number(((wheyData.fat * lancheMProtQty) / 100).toFixed(1)),
+            calories: Math.round((wheyData.calories * lancheMProtQty) / 100)
+          });
+        } else if (!useWhey && targetProt > 10) {
+          items.push({
+            name: 'Ovo, de galinha, inteiro, cozido/10minutos',
+            quantity: 50,
+            protein: Number((ovoData.protein * 0.5).toFixed(1)),
+            carbs: Number((ovoData.carbs * 0.5).toFixed(1)),
+            fat: Number((ovoData.fat * 0.5).toFixed(1)),
+            calories: Math.round(ovoData.calories * 0.5)
+          });
+        }
+
+        items.push({
+          name: 'Banana, prata, crua',
+          quantity: bananaQty,
+          protein: Number(((bananaData.protein * bananaQty) / 100).toFixed(1)),
+          carbs: Number(((bananaData.carbs * bananaQty) / 100).toFixed(1)),
+          fat: Number(((bananaData.fat * bananaQty) / 100).toFixed(1)),
+          calories: Math.round((bananaData.calories * bananaQty) / 100)
+        });
+
+        if (paoQty >= 20) {
+          items.push({
+            name: 'Pão, trigo, forma, integral',
+            quantity: paoQty,
+            protein: Number(((paoData.protein * paoQty) / 100).toFixed(1)),
+            carbs: Number(((paoData.carbs * paoQty) / 100).toFixed(1)),
+            fat: Number(((paoData.fat * paoQty) / 100).toFixed(1)),
+            calories: Math.round((paoData.calories * paoQty) / 100)
+          });
+        }
       }
-    ];
+      else if (def.name === 'Almoço') {
+        const almocoProtData = (goal === 'emagrecimento') ? frangoData : patinhoData;
+        const almocoProtName = (goal === 'emagrecimento') ? 'Frango, peito, sem pele, grelhado' : 'Carne, bovina, patinho, sem gordura, grelhado';
 
-    if (almocoAzeiteQty >= 2) {
-      almocoItems.push({
-        name: 'Azeite, de oliva, extra virgem',
-        quantity: almocoAzeiteQty,
-        protein: 0,
-        carbs: 0,
-        fat: almocoAzeiteQty,
-        calories: Math.round((azeiteData.calories * almocoAzeiteQty) / 100)
-      });
-    }
+        const almocoProtQty = Math.round((targetProt / almocoProtData.protein) * 100);
+        
+        let almocoFeijaoQty = 80;
+        const feijaoCarbs = (feijaoData.carbs * almocoFeijaoQty) / 100;
+        let remainingAlmocoCarbs = targetCarbs - feijaoCarbs;
+        let almocoArrozQty = Math.max(30, Math.round((remainingAlmocoCarbs / arrozData.carbs) * 100));
 
-    mealsResult.push({
-      name: 'Almoço',
-      items: almocoItems
-    });
+        items.push({
+          name: almocoProtName,
+          quantity: almocoProtQty,
+          protein: Number(((almocoProtData.protein * almocoProtQty) / 100).toFixed(1)),
+          carbs: Number(((almocoProtData.carbs * almocoProtQty) / 100).toFixed(1)),
+          fat: Number(((almocoProtData.fat * almocoProtQty) / 100).toFixed(1)),
+          calories: Math.round((almocoProtData.calories * almocoProtQty) / 100)
+        });
 
-    // --- Lanche da Tarde (15%) ---
-    const iogurteQty = 150;
-    const iogurteP = (iogurteData.protein * iogurteQty) / 100;
-    const iogurteC = (iogurteData.carbs * iogurteQty) / 100;
+        items.push({
+          name: 'Arroz, integral, cozido',
+          quantity: almocoArrozQty,
+          protein: Number(((arrozData.protein * almocoArrozQty) / 100).toFixed(1)),
+          carbs: Number(((arrozData.carbs * almocoArrozQty) / 100).toFixed(1)),
+          fat: Number(((arrozData.fat * almocoArrozQty) / 100).toFixed(1)),
+          calories: Math.round((arrozData.calories * almocoArrozQty) / 100)
+        });
 
-    const lancheItems = [
-      {
-        name: 'Iogurte, natural, desnatado',
-        quantity: iogurteQty,
-        protein: Number(iogurteP.toFixed(1)),
-        carbs: Number(iogurteC.toFixed(1)),
-        fat: 0.1,
-        calories: Math.round((iogurteData.calories * iogurteQty) / 100)
+        items.push({
+          name: 'Feijão, carioca, cozido',
+          quantity: almocoFeijaoQty,
+          protein: Number(((feijaoData.protein * almocoFeijaoQty) / 100).toFixed(1)),
+          carbs: Number(((feijaoData.carbs * almocoFeijaoQty) / 100).toFixed(1)),
+          fat: Number(((feijaoData.fat * almocoFeijaoQty) / 100).toFixed(1)),
+          calories: Math.round((feijaoData.calories * almocoFeijaoQty) / 100)
+        });
+
+        const feijaoF = (feijaoData.fat * almocoFeijaoQty) / 100;
+        const currentAlmocoFat = feijaoF + ((almocoProtData.fat * almocoProtQty) / 100) + ((arrozData.fat * almocoArrozQty) / 100);
+        const remainingAlmocoFat = Math.max(0, targetFat - currentAlmocoFat);
+        const almocoAzeiteQty = Math.round((remainingAlmocoFat / azeiteData.fat) * 100);
+
+        if (almocoAzeiteQty >= 2) {
+          items.push({
+            name: 'Azeite, de oliva, extra virgem',
+            quantity: almocoAzeiteQty,
+            protein: 0,
+            carbs: 0,
+            fat: almocoAzeiteQty,
+            calories: Math.round((azeiteData.calories * almocoAzeiteQty) / 100)
+          });
+        }
       }
-    ];
+      else if (def.name === 'Lanche da Tarde') {
+        const iogurteQty = 150;
+        let lancheWheyQty = 0;
+        let lancheOvoQty = 0;
 
-    let currentLancheProt = iogurteP;
-    if (mealP.lanche.prot > 15) {
-      const remainingLancheProt = mealP.lanche.prot - iogurteP;
-      const wheyQty = Math.round((remainingLancheProt / wheyData.protein) * 100);
-      currentLancheProt += (wheyData.protein * wheyQty) / 100;
-      lancheItems.push({
-        name: 'Whey Protein',
-        quantity: wheyQty,
-        protein: Number(((wheyData.protein * wheyQty) / 100).toFixed(1)),
-        carbs: Number(((wheyData.carbs * wheyQty) / 100).toFixed(1)),
-        fat: Number(((wheyData.fat * wheyQty) / 100).toFixed(1)),
-        calories: Math.round((wheyData.calories * wheyQty) / 100)
-      });
-    }
+        const yogProt = (iogurteData.protein * iogurteQty) / 100;
+        const remainingProt = targetProt - yogProt;
 
-    const currentLancheCarbs = lancheItems.reduce((acc, curr) => acc + curr.carbs, 0);
-    const remainingLancheCarbs = Math.max(10, mealP.lanche.carbs - currentLancheCarbs);
-    const lancheBananaQty = Math.round((remainingLancheCarbs / bananaData.carbs) * 100);
+        if (useWhey) {
+          if (remainingProt > 5) {
+            lancheWheyQty = Math.round((remainingProt / wheyData.protein) * 100);
+          }
+        } else {
+          if (remainingProt > 5) {
+            lancheOvoQty = Math.min(100, Math.round((remainingProt / ovoData.protein) * 100));
+          }
+        }
 
-    lancheItems.push({
-      name: 'Banana, prata, crua',
-      quantity: lancheBananaQty,
-      protein: Number(((bananaData.protein * lancheBananaQty) / 100).toFixed(1)),
-      carbs: Number(((bananaData.carbs * lancheBananaQty) / 100).toFixed(1)),
-      fat: Number(((bananaData.fat * lancheBananaQty) / 100).toFixed(1)),
-      calories: Math.round((bananaData.calories * lancheBananaQty) / 100)
-    });
+        const bananaQty = 80;
+        const carbsFromYogAndBanana = ((iogurteData.carbs * iogurteQty) / 100) + bananaQty * 0.26;
+        const remainingCarbs = Math.max(0, targetCarbs - carbsFromYogAndBanana);
 
-    const currentLancheFat = lancheItems.reduce((acc, curr) => acc + curr.fat, 0);
-    const remainingLancheFat = Math.max(0, mealP.lanche.fat - currentLancheFat);
-    const lancheCastanhaQty = Math.round((remainingLancheFat / castanhaData.fat) * 100);
+        items.push({
+          name: 'Iogurte, natural, desnatado',
+          quantity: iogurteQty,
+          protein: Number(((iogurteData.protein * iogurteQty) / 100).toFixed(1)),
+          carbs: Number(((iogurteData.carbs * iogurteQty) / 100).toFixed(1)),
+          fat: Number(((iogurteData.fat * iogurteQty) / 100).toFixed(1)),
+          calories: Math.round((iogurteData.calories * iogurteQty) / 100)
+        });
 
-    if (lancheCastanhaQty >= 5) {
-      lancheItems.push({
-        name: 'Castanha-de-caju, torrada, salgada',
-        quantity: lancheCastanhaQty,
-        protein: Number(((castanhaData.protein * lancheCastanhaQty) / 100).toFixed(1)),
-        carbs: Number(((castanhaData.carbs * lancheCastanhaQty) / 100).toFixed(1)),
-        fat: Number(((castanhaData.fat * lancheCastanhaQty) / 100).toFixed(1)),
-        calories: Math.round((castanhaData.calories * lancheCastanhaQty) / 100)
-      });
-    }
+        if (lancheWheyQty > 0) {
+          items.push({
+            name: 'Whey Protein',
+            quantity: lancheWheyQty,
+            protein: Number(((wheyData.protein * lancheWheyQty) / 100).toFixed(1)),
+            carbs: Number(((wheyData.carbs * lancheWheyQty) / 100).toFixed(1)),
+            fat: Number(((wheyData.fat * lancheWheyQty) / 100).toFixed(1)),
+            calories: Math.round((wheyData.calories * lancheWheyQty) / 100)
+          });
+        } else if (lancheOvoQty > 0) {
+          items.push({
+            name: 'Ovo, de galinha, inteiro, cozido/10minutos',
+            quantity: lancheOvoQty,
+            protein: Number(((ovoData.protein * lancheOvoQty) / 100).toFixed(1)),
+            carbs: Number(((ovoData.carbs * lancheOvoQty) / 100).toFixed(1)),
+            fat: Number(((ovoData.fat * lancheOvoQty) / 100).toFixed(1)),
+            calories: Math.round((ovoData.calories * lancheOvoQty) / 100)
+          });
+        }
 
-    mealsResult.push({
-      name: 'Lanche da Tarde',
-      items: lancheItems
-    });
+        items.push({
+          name: 'Banana, prata, crua',
+          quantity: bananaQty,
+          protein: Number(((bananaData.protein * bananaQty) / 100).toFixed(1)),
+          carbs: Number(((bananaData.carbs * bananaQty) / 100).toFixed(1)),
+          fat: Number(((bananaData.fat * bananaQty) / 100).toFixed(1)),
+          calories: Math.round((bananaData.calories * bananaQty) / 100)
+        });
 
-    // --- Jantar (30%) ---
-    const jantarPeixeQty = Math.round((mealP.jantar.prot / peixeData.protein) * 100);
-    const jantarBatataQty = Math.round((mealP.jantar.carbs / batataData.carbs) * 100);
+        const currentLancheFat = items.reduce((acc, curr) => acc + curr.fat, 0);
+        const remainingLancheFat = Math.max(0, targetFat - currentLancheFat);
+        const lancheCastanhaQty = Math.round((remainingLancheFat / castanhaData.fat) * 100);
 
-    const currentJantarFat = ((peixeData.fat * jantarPeixeQty) / 100) + ((batataData.fat * jantarBatataQty) / 100);
-    const remainingJantarFat = Math.max(0, mealP.jantar.fat - currentJantarFat);
-    const jantarAzeiteQty = Math.round((remainingJantarFat / azeiteData.fat) * 100);
-
-    const jantarItems = [
-      {
-        name: 'Merluza, filé, assado',
-        quantity: jantarPeixeQty,
-        protein: Number(((peixeData.protein * jantarPeixeQty) / 100).toFixed(1)),
-        carbs: Number(((peixeData.carbs * jantarPeixeQty) / 100).toFixed(1)),
-        fat: Number(((peixeData.fat * jantarPeixeQty) / 100).toFixed(1)),
-        calories: Math.round((peixeData.calories * jantarPeixeQty) / 100)
-      },
-      {
-        name: 'Batata, doce, cozida',
-        quantity: jantarBatataQty,
-        protein: Number(((batataData.protein * jantarBatataQty) / 100).toFixed(1)),
-        carbs: Number(((batataData.carbs * jantarBatataQty) / 100).toFixed(1)),
-        fat: Number(((batataData.fat * batataData.fat) / 100).toFixed(1)),
-        calories: Math.round((batataData.calories * jantarBatataQty) / 100)
+        if (lancheCastanhaQty >= 5) {
+          items.push({
+            name: 'Castanha-de-caju, torrada, salgada',
+            quantity: lancheCastanhaQty,
+            protein: Number(((castanhaData.protein * lancheCastanhaQty) / 100).toFixed(1)),
+            carbs: Number(((castanhaData.carbs * lancheCastanhaQty) / 100).toFixed(1)),
+            fat: Number(((castanhaData.fat * lancheCastanhaQty) / 100).toFixed(1)),
+            calories: Math.round((castanhaData.calories * lancheCastanhaQty) / 100)
+          });
+        }
       }
-    ];
+      else if (def.name === 'Jantar') {
+        const jantarPeixeQty = Math.round((targetProt / peixeData.protein) * 100);
+        const jantarBatataQty = Math.round((targetCarbs / batataData.carbs) * 100);
 
-    if (jantarAzeiteQty >= 2) {
-      jantarItems.push({
-        name: 'Azeite, de oliva, extra virgem',
-        quantity: jantarAzeiteQty,
-        protein: 0,
-        carbs: 0,
-        fat: jantarAzeiteQty,
-        calories: Math.round((azeiteData.calories * jantarAzeiteQty) / 100)
+        items.push({
+          name: 'Merluza, filé, assado',
+          quantity: jantarPeixeQty,
+          protein: Number(((peixeData.protein * jantarPeixeQty) / 100).toFixed(1)),
+          carbs: Number(((peixeData.carbs * jantarPeixeQty) / 100).toFixed(1)),
+          fat: Number(((peixeData.fat * jantarPeixeQty) / 100).toFixed(1)),
+          calories: Math.round((peixeData.calories * jantarPeixeQty) / 100)
+        });
+
+        if (jantarBatataQty > 0) {
+          items.push({
+            name: 'Batata, doce, cozida',
+            quantity: jantarBatataQty,
+            protein: Number(((batataData.protein * jantarBatataQty) / 100).toFixed(1)),
+            carbs: Number(((batataData.carbs * jantarBatataQty) / 100).toFixed(1)),
+            fat: Number(((batataData.fat * batataData.fat) / 100).toFixed(1)),
+            calories: Math.round((batataData.calories * jantarBatataQty) / 100)
+          });
+        }
+
+        const currentJantarFat = ((peixeData.fat * jantarPeixeQty) / 100) + ((batataData.fat * jantarBatataQty) / 100);
+        const remainingJantarFat = Math.max(0, targetFat - currentJantarFat);
+        const jantarAzeiteQty = Math.round((remainingJantarFat / azeiteData.fat) * 100);
+
+        if (jantarAzeiteQty >= 2) {
+          items.push({
+            name: 'Azeite, de oliva, extra virgem',
+            quantity: jantarAzeiteQty,
+            protein: 0,
+            carbs: 0,
+            fat: jantarAzeiteQty,
+            calories: Math.round((azeiteData.calories * jantarAzeiteQty) / 100)
+          });
+        }
+      }
+      else if (def.name === 'Ceia') {
+        const iogurteQty = 150;
+        items.push({
+          name: 'Iogurte, natural, desnatado',
+          quantity: iogurteQty,
+          protein: Number(((iogurteData.protein * iogurteQty) / 100).toFixed(1)),
+          carbs: Number(((iogurteData.carbs * iogurteQty) / 100).toFixed(1)),
+          fat: Number(((iogurteData.fat * iogurteQty) / 100).toFixed(1)),
+          calories: Math.round((iogurteData.calories * iogurteQty) / 100)
+        });
+
+        const currentCeiaFat = ((iogurteData.fat * iogurteQty) / 100);
+        const remainingCeiaFat = Math.max(0, targetFat - currentCeiaFat);
+        const ceiaCastanhaQty = Math.round((remainingCeiaFat / castanhaData.fat) * 100);
+
+        if (ceiaCastanhaQty >= 5) {
+          items.push({
+            name: 'Castanha-de-caju, torrada, salgada',
+            quantity: ceiaCastanhaQty,
+            protein: Number(((castanhaData.protein * ceiaCastanhaQty) / 100).toFixed(1)),
+            carbs: Number(((castanhaData.carbs * ceiaCastanhaQty) / 100).toFixed(1)),
+            fat: Number(((castanhaData.fat * ceiaCastanhaQty) / 100).toFixed(1)),
+            calories: Math.round((castanhaData.calories * ceiaCastanhaQty) / 100)
+          });
+        }
+      }
+
+      mealsResult.push({
+        name: def.name,
+        items
       });
     }
 
-    mealsResult.push({
-      name: 'Jantar',
-      items: jantarItems
+    // --- Lógica de Calibração Fina de Calorias (Fine-Tuning) ---
+    // Objetivo: ajustar os carboidratos/gorduras de energia rápida (arroz, batata doce, azeite)
+    // para alinhar o total do preset com o target_calories exato do usuário.
+    let totalPlannedCalories = 0;
+    mealsResult.forEach(m => {
+      m.items.forEach(i => {
+        totalPlannedCalories += Math.round((Number(i.calories) * Number(i.quantity)) / 100);
+      });
     });
+
+    let calorieDiff = totalPlannedCalories - targetCalories;
+
+    if (Math.abs(calorieDiff) > 10) {
+      let arrozItem = null;
+      let batataItem = null;
+      let azeiteAlmocoItem = null;
+      let azeiteJantarItem = null;
+
+      mealsResult.forEach(m => {
+        if (m.name === 'Almoço') {
+          arrozItem = m.items.find(i => i.name === 'Arroz, integral, cozido');
+          azeiteAlmocoItem = m.items.find(i => i.name === 'Azeite, de oliva, extra virgem');
+        }
+        if (m.name === 'Jantar') {
+          batataItem = m.items.find(i => i.name === 'Batata, doce, cozida');
+          azeiteJantarItem = m.items.find(i => i.name === 'Azeite, de oliva, extra virgem');
+        }
+      });
+
+      // 1. Ajustar pelos carboidratos (Arroz e Batata)
+      // Cada grama de Arroz integral tem aprox 1.24 kcal.
+      // Cada grama de Batata doce tem aprox 0.77 kcal.
+      if (calorieDiff > 0) {
+        // Reduzir carboidratos para cortar excesso calórico
+        if (arrozItem && batataItem) {
+          const arrozReductionCal = calorieDiff * 0.6;
+          const batataReductionCal = calorieDiff * 0.4;
+
+          const arrozQtyReduction = Math.round(arrozReductionCal / 1.24);
+          const batataQtyReduction = Math.round(batataReductionCal / 0.77);
+
+          arrozItem.quantity = Math.max(50, arrozItem.quantity - arrozQtyReduction);
+          batataItem.quantity = Math.max(50, batataItem.quantity - batataQtyReduction);
+        } else if (arrozItem) {
+          const arrozQtyReduction = Math.round(calorieDiff / 1.24);
+          arrozItem.quantity = Math.max(50, arrozItem.quantity - arrozQtyReduction);
+        } else if (batataItem) {
+          const batataQtyReduction = Math.round(calorieDiff / 0.77);
+          batataItem.quantity = Math.max(50, batataItem.quantity - batataQtyReduction);
+        }
+      } else {
+        // Aumentar carboidratos (se faltou calorias na heurística)
+        if (arrozItem && batataItem) {
+          const arrozIncreaseCal = Math.abs(calorieDiff) * 0.6;
+          const batataIncreaseCal = Math.abs(calorieDiff) * 0.4;
+
+          const arrozQtyIncrease = Math.round(arrozIncreaseCal / 1.24);
+          const batataQtyIncrease = Math.round(batataIncreaseCal / 0.77);
+
+          arrozItem.quantity += arrozQtyIncrease;
+          batataItem.quantity += batataQtyIncrease;
+        } else if (arrozItem) {
+          const arrozQtyIncrease = Math.round(Math.abs(calorieDiff) / 1.24);
+          arrozItem.quantity += arrozQtyIncrease;
+        }
+      }
+
+      // Recalcular macros dos itens de carboidratos modificados
+      if (arrozItem) {
+        const q = arrozItem.quantity;
+        arrozItem.protein = Number(((2.6 * q) / 100).toFixed(1));
+        arrozItem.carbs = Number(((25.8 * q) / 100).toFixed(1));
+        arrozItem.fat = Number(((1.0 * q) / 100).toFixed(1));
+        arrozItem.calories = Math.round((124 * q) / 100);
+      }
+      if (batataItem) {
+        const q = batataItem.quantity;
+        batataItem.protein = Number(((0.6 * q) / 100).toFixed(1));
+        batataItem.carbs = Number(((18.4 * q) / 100).toFixed(1));
+        batataItem.fat = Number(((0.1 * q) / 100).toFixed(1));
+        batataItem.calories = Math.round((77 * q) / 100);
+      }
+
+      // 2. Segunda checagem para calibrar azeite se houver diferença calórica residual
+      let newTotalPlanned = 0;
+      mealsResult.forEach(m => {
+        m.items.forEach(i => {
+          newTotalPlanned += Math.round((Number(i.calories) * Number(i.quantity)) / 100);
+        });
+      });
+      calorieDiff = newTotalPlanned - targetCalories;
+
+      if (Math.abs(calorieDiff) > 10) {
+        if (calorieDiff > 0) {
+          if (azeiteAlmocoItem) {
+            const azeiteQtyReduction = Math.round(calorieDiff / 8.84);
+            azeiteAlmocoItem.quantity = Math.max(5, azeiteAlmocoItem.quantity - azeiteQtyReduction);
+          } else if (azeiteJantarItem) {
+            const azeiteQtyReduction = Math.round(calorieDiff / 8.84);
+            azeiteJantarItem.quantity = Math.max(5, azeiteJantarItem.quantity - azeiteQtyReduction);
+          }
+        } else {
+          if (azeiteAlmocoItem) {
+            const azeiteQtyIncrease = Math.round(Math.abs(calorieDiff) / 8.84);
+            azeiteAlmocoItem.quantity += azeiteQtyIncrease;
+          }
+        }
+
+        // Recalcular macros dos azeites modificados
+        if (azeiteAlmocoItem) {
+          const q = azeiteAlmocoItem.quantity;
+          azeiteAlmocoItem.fat = q;
+          azeiteAlmocoItem.calories = Math.round((884 * q) / 100);
+        }
+        if (azeiteJantarItem) {
+          const q = azeiteJantarItem.quantity;
+          azeiteJantarItem.fat = q;
+          azeiteJantarItem.calories = Math.round((884 * q) / 100);
+        }
+      }
+    }
 
     // 5. Deletar dieta antiga e persistir as novas refeições
     await conn.query('DELETE FROM diet_meals WHERE user_id = ?', [req.userId]);
@@ -421,17 +726,24 @@ router.post('/preset', authMiddleware, async (req, res) => {
       const mealId = mealResult.insertId;
 
       for (const item of meal.items) {
+        const qty = Number(item.quantity) || 100;
+        const factor = qty / 100;
+        const protein100g = Number((Number(item.protein) / factor).toFixed(1));
+        const carbs100g = Number((Number(item.carbs) / factor).toFixed(1));
+        const fat100g = Number((Number(item.fat) / factor).toFixed(1));
+        const calories100g = Math.round(Number(item.calories) / factor);
+
         await conn.query(
           `INSERT INTO diet_meal_items (diet_meal_id, name, quantity, protein, carbs, fat, calories) 
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
             mealId,
             item.name,
-            item.quantity,
-            item.protein,
-            item.carbs,
-            item.fat,
-            item.calories
+            qty,
+            protein100g,
+            carbs100g,
+            fat100g,
+            calories100g
           ]
         );
       }

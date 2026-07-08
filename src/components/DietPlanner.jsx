@@ -64,7 +64,9 @@ export default function DietPlanner({
     goal: profile?.goal || 'emagrecimento',
     workoutDays: profile?.workoutDays || 4,
     regenerateDiet: true,
-    regenerateWorkout: false
+    regenerateWorkout: false,
+    useWhey: profile?.useWhey !== undefined ? profile.useWhey : true,
+    mealsPerDay: profile?.mealsPerDay || 4
   });
 
   // Estado para cadastro de alimento customizado no modal do plano base
@@ -84,6 +86,11 @@ export default function DietPlanner({
   const [foodQuantity, setFoodQuantity] = useState('100');
   const [searchResults, setSearchResults] = useState([]);
   const [selectedDiaryFood, setSelectedDiaryFood] = useState(null);
+  
+  // Edição direta de quantidade do log (custom modal)
+  const [editingLogItem, setEditingLogItem] = useState(null);
+  const [editingQuantity, setEditingQuantity] = useState('');
+  const [editingBasePlanMealId, setEditingBasePlanMealId] = useState(null);
 
   // Estados para Substituição por Equivalência
   const [substitutingItem, setSubstitutingItem] = useState(null);
@@ -109,7 +116,9 @@ export default function DietPlanner({
         height: profile.height || 170,
         activityLevel: profile.activityLevel || 'moderado',
         goal: profile.goal || 'emagrecimento',
-        workoutDays: profile.workoutDays || 4
+        workoutDays: profile.workoutDays || 4,
+        useWhey: profile.useWhey !== undefined ? profile.useWhey : true,
+        mealsPerDay: profile.mealsPerDay || 4
       }));
     }
   }, [profile]);
@@ -368,6 +377,96 @@ export default function DietPlanner({
     }
   };
 
+  const handleEditLogQuantityDirectly = (logItem) => {
+    setEditingLogItem(logItem);
+    setEditingQuantity(Math.round(logItem.quantity).toString());
+    setEditingBasePlanMealId(null);
+  };
+
+  const handleEditBasePlanItemQuantityDirectly = (mealId, item) => {
+    setEditingLogItem({
+      id: item.id,
+      food_name: item.name,
+      quantity: item.quantity
+    });
+    setEditingQuantity(Math.round(item.quantity).toString());
+    setEditingBasePlanMealId(mealId);
+  };
+
+  const handleAdjustBasePlanItemQuantity = async (mealId, item, direction) => {
+    const factor = direction === 'increment' ? 1.25 : 0.75;
+    const newQty = Math.max(10, Math.round(item.quantity * factor));
+    try {
+      await axios.put(`/api/diet/meal/${mealId}/item/${item.id}`, {
+        quantity: newQty
+      });
+      
+      // Sincronizar plano base localmente na hora
+      const updatedDiet = { ...diet };
+      const mealIdx = updatedDiet.meals.findIndex(m => m.id === mealId);
+      if (mealIdx !== -1) {
+        const itemIdx = updatedDiet.meals[mealIdx].items.findIndex(i => i.id === item.id);
+        if (itemIdx !== -1) {
+          updatedDiet.meals[mealIdx].items[itemIdx].quantity = newQty;
+        }
+      }
+      setDiet(updatedDiet);
+    } catch (err) {
+      console.error('Erro ao ajustar quantidade do plano padrão:', err);
+    }
+  };
+
+  const handleSaveQuantityModal = async (e) => {
+    if (e) e.preventDefault();
+    if (!editingLogItem) return;
+    
+    const newQty = Number(editingQuantity);
+    if (isNaN(newQty) || newQty <= 0) {
+      alert(
+        lang === 'pt' 
+          ? 'Por favor, insira um número válido maior que 0.' 
+          : 'Please enter a valid number greater than 0.'
+      );
+      return;
+    }
+    
+    try {
+      if (editingBasePlanMealId) {
+        // Atualizar no Plano Base
+        await axios.put(`/api/diet/meal/${editingBasePlanMealId}/item/${editingLogItem.id}`, {
+          quantity: newQty
+        });
+
+        // Sincronizar plano base localmente
+        const updatedDiet = { ...diet };
+        const mealIdx = updatedDiet.meals.findIndex(m => m.id === editingBasePlanMealId);
+        if (mealIdx !== -1) {
+          const itemIdx = updatedDiet.meals[mealIdx].items.findIndex(i => i.id === editingLogItem.id);
+          if (itemIdx !== -1) {
+            updatedDiet.meals[mealIdx].items[itemIdx].quantity = newQty;
+          }
+        }
+        setDiet(updatedDiet);
+        setEditingBasePlanMealId(null);
+      } else {
+        // Atualizar no Diário Alimentar
+        const ratio = newQty / editingLogItem.quantity;
+        await axios.put(`/api/tracker/diet/${editingLogItem.id}`, {
+          food_name: editingLogItem.food_name,
+          quantity: newQty,
+          protein: editingLogItem.protein * ratio,
+          carbs: editingLogItem.carbs * ratio,
+          fat: editingLogItem.fat * ratio,
+          calories: editingLogItem.calories * ratio
+        });
+        onRefreshData();
+      }
+      setEditingLogItem(null);
+    } catch (err) {
+      console.error('Erro ao salvar quantidade do alimento:', err);
+    }
+  };
+
   // Excluir log do diário
   const handleDeleteLogItem = async (id) => {
     try {
@@ -554,33 +653,39 @@ export default function DietPlanner({
     const carbGrams = Math.round(remainingCalories > 0 ? remainingCalories / 4 : 50);
 
     try {
-      // 1. Atualizar perfil com novos dados e macros recalculados
-      const profileRes = await axios.put('/api/auth/profile', {
-        gender: genderVal,
-        age: ageVal,
-        weight: weightVal,
-        height: heightVal,
-        activityLevel: activityLevelFactor,
-        goal: goalVal,
-        workoutDays: workoutDaysVal,
-        bmr: calculatedBmr,
-        tdee: calculatedTdee,
-        targetCalories: calculatedTargetCalories,
-        macros: {
-          protein: proteinGrams,
-          carbs: carbGrams,
-          fat: fatGrams
-        }
-      });
-
-      // Atualizar perfil global no frontend
-      setProfile(profileRes.data.profile);
-
-      // 2. Re-gerar Dieta
-      if (recalculateForm.regenerateDiet) {
-        const dietRes = await axios.post('/api/diet/preset', { presetKey: goalVal });
-        setDiet(dietRes.data);
-      }
+       // 1. Atualizar perfil com novos dados e macros recalculados
+       const profileRes = await axios.put('/api/auth/profile', {
+         gender: genderVal,
+         age: ageVal,
+         weight: weightVal,
+         height: heightVal,
+         activityLevel: activityLevelFactor,
+         goal: goalVal,
+         workoutDays: workoutDaysVal,
+         bmr: calculatedBmr,
+         tdee: calculatedTdee,
+         targetCalories: calculatedTargetCalories,
+         macros: {
+           protein: proteinGrams,
+           carbs: carbGrams,
+           fat: fatGrams
+         },
+         useWhey: recalculateForm.useWhey,
+         mealsPerDay: Number(recalculateForm.mealsPerDay)
+       });
+ 
+       // Atualizar perfil global no frontend
+       setProfile(profileRes.data.profile);
+ 
+       // 2. Re-gerar Dieta
+       if (recalculateForm.regenerateDiet) {
+         const dietRes = await axios.post('/api/diet/preset', { 
+           presetKey: goalVal,
+           useWhey: recalculateForm.useWhey,
+           mealsPerDay: Number(recalculateForm.mealsPerDay)
+         });
+         setDiet(dietRes.data);
+       }
 
       // 3. Re-gerar Treino
       if (recalculateForm.regenerateWorkout) {
@@ -648,8 +753,18 @@ export default function DietPlanner({
     });
   }
 
-  // Agrupamento do diário
-  const mealsStructure = ['Café da Manhã', 'Almoço', 'Lanche', 'Jantar'];
+  // Agrupamento do diário dinâmico baseado no perfil do usuário
+  const mealsPerDay = profile?.mealsPerDay || 4;
+  let mealsStructure = ['Café da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar'];
+  
+  if (mealsPerDay === 3) {
+    mealsStructure = ['Café da Manhã', 'Almoço', 'Jantar'];
+  } else if (mealsPerDay === 5) {
+    mealsStructure = ['Café da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar', 'Ceia'];
+  } else if (mealsPerDay === 6) {
+    mealsStructure = ['Café da Manhã', 'Lanche da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar', 'Ceia'];
+  }
+
   const groupedDietLogs = {};
   mealsStructure.forEach(m => groupedDietLogs[m] = dietLogs.filter(l => l.meal_name === m));
   dietLogs.forEach(l => {
@@ -658,6 +773,28 @@ export default function DietPlanner({
       groupedDietLogs[l.meal_name].push(l);
     }
   });
+
+  // Cálculo das calorias e macros reais planejados no plano recomendado base
+  let plannedCal = 0;
+  let plannedProtein = 0;
+  let plannedCarbs = 0;
+  let plannedFat = 0;
+
+  if (diet?.meals) {
+    diet.meals.forEach(meal => {
+      meal.items?.forEach(item => {
+        const itemCal = Math.round((Number(item.calories || 0) * Number(item.quantity || 0)) / 100);
+        const itemProt = (Number(item.protein || 0) * Number(item.quantity || 0)) / 100;
+        const itemCarbs = (Number(item.carbs || 0) * Number(item.quantity || 0)) / 100;
+        const itemFat = (Number(item.fat || 0) * Number(item.quantity || 0)) / 100;
+
+        plannedCal += itemCal;
+        plannedProtein += itemProt;
+        plannedCarbs += itemCarbs;
+        plannedFat += itemFat;
+      });
+    });
+  }
 
   return (
     <div className="w-full max-w-[1600px] mx-auto p-4 md:p-6 space-y-6 pb-24">
@@ -698,7 +835,7 @@ export default function DietPlanner({
               </h3>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="text-[10px] text-zinc-400 font-bold">
-                  {profile.targetCalories} kcal • P:{profile.macros.protein}g C:{profile.macros.carbs}g
+                  {plannedCal > 0 ? plannedCal : profile.targetCalories} kcal • P:{plannedCal > 0 ? Math.round(plannedProtein) : profile.macros.protein}g C:{plannedCal > 0 ? Math.round(plannedCarbs) : profile.macros.carbs}g G:{plannedCal > 0 ? Math.round(plannedFat) : profile.macros.fat}g
                 </span>
                 {isEditingBasePlan && (
                   <button 
@@ -746,7 +883,13 @@ export default function DietPlanner({
                             <div className="space-y-0.5 flex-1 min-w-0">
                               <span className="font-semibold text-xs text-zinc-700 dark:text-zinc-300 block truncate">{item.name}</span>
                               <span className="text-[9px] text-zinc-400 block font-mono">
-                                {item.quantity}g • {Math.round((item.calories * item.quantity) / 100)} kcal
+                                {!isEditingBasePlan && `${item.quantity}g${item.name?.toLowerCase().includes('ovo') ? ` (~${(Number(item.quantity) / 50).toFixed(1).replace('.0', '')} unid)` : ''} • `}
+                                {isEditingBasePlan && item.name?.toLowerCase().includes('ovo') && (
+                                  <span className="text-blue-500 dark:text-blue-400 font-bold mr-1">
+                                    ~{(Number(item.quantity) / 50).toFixed(1).replace('.0', '')} unid •
+                                  </span>
+                                )}
+                                {Math.round((item.calories * item.quantity) / 100)} kcal
                               </span>
                             </div>
 
@@ -761,7 +904,30 @@ export default function DietPlanner({
                                   <Plus className="w-3.5 h-3.5" />
                                 </button>
                               ) : (
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-1.5">
+                                  {/* Controle interativo de quantidade no plano base */}
+                                  <div className="flex items-center border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-white dark:bg-zinc-900 mr-1 shadow-sm">
+                                    <button 
+                                      onClick={() => handleAdjustBasePlanItemQuantity(meal.id, item, 'decrement')} 
+                                      className="px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-[10px] font-extrabold cursor-pointer"
+                                    >
+                                      -
+                                    </button>
+                                    <button
+                                      onClick={() => handleEditBasePlanItemQuantityDirectly(meal.id, item)}
+                                      className="px-2 py-0.5 text-[9px] font-bold text-zinc-700 dark:text-zinc-300 border-x border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-500 transition-colors cursor-pointer"
+                                      title={lang === 'pt' ? 'Clique para alterar a quantidade' : 'Click to edit quantity'}
+                                    >
+                                      {Number(item.quantity).toFixed(0)}g
+                                    </button>
+                                    <button 
+                                      onClick={() => handleAdjustBasePlanItemQuantity(meal.id, item, 'increment')} 
+                                      className="px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-[10px] font-extrabold cursor-pointer"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+
                                   {/* Botão de Substituição no plano base */}
                                   <button
                                     onClick={() => {
@@ -1079,88 +1245,106 @@ export default function DietPlanner({
                 </button>
               </div>
             ) : (
-              mealsStructure.map((mealName) => {
-                const logs = groupedDietLogs[mealName] || [];
-                let mealCal = 0;
-                logs.forEach(l => mealCal += Math.round(Number(l.calories)));
+              (() => {
+                const activeMealsList = [...mealsStructure];
+                dietLogs.forEach(log => {
+                  if (!activeMealsList.includes(log.meal_name)) {
+                    activeMealsList.push(log.meal_name);
+                  }
+                });
 
-                return (
-                  <div key={mealName} className="border border-zinc-150 dark:border-zinc-800/80 rounded-2xl overflow-hidden shadow-sm">
-                    {/* Header */}
-                    <div className="px-4 py-3 bg-zinc-50 dark:bg-[#121216] border-b border-zinc-150 dark:border-zinc-800 flex justify-between items-center">
-                      <div>
-                        <span className="font-extrabold text-sm text-zinc-950 dark:text-zinc-50">{mealName}</span>
-                        <span className="text-[10px] text-zinc-400 ml-2 font-medium">({logs.length} alimentos)</span>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className="font-mono font-bold text-xs text-zinc-900 dark:text-zinc-100">{mealCal} kcal</span>
-                        <button
-                          onClick={() => setSelectedMealForAdd(mealName)}
-                          className="p-1 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all cursor-pointer"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
+                return activeMealsList.map((mealName) => {
+                  const logs = groupedDietLogs[mealName] || [];
+                  let mealCal = 0;
+                  logs.forEach(l => mealCal += Math.round(Number(l.calories)));
 
-                    {/* Itens */}
-                    <div className="p-4 space-y-3">
-                      {logs.length === 0 ? (
-                        <p className="text-xs text-zinc-400 italic py-1">Nenhum alimento registrado nesta refeição.</p>
-                      ) : (
-                        <div className="space-y-3.5">
-                          {logs.map((item) => (
-                            <div key={item.id} className="flex justify-between items-start gap-4 pb-3 border-b border-zinc-100 dark:border-zinc-900 last:border-0 last:pb-0">
-                              <div className="space-y-0.5">
-                                <span className="font-semibold text-xs text-zinc-850 dark:text-zinc-200">{item.food_name}</span>
-                                <div className="flex items-center gap-2 text-[10px] text-zinc-400">
-                                  <span>{item.quantity}g</span>
-                                  <span>•</span>
-                                  <span>P: {Math.round(item.protein)}g</span>
-                                  <span>•</span>
-                                  <span>C: {Math.round(item.carbs)}g</span>
-                                  <span>•</span>
-                                  <span>G: {Math.round(item.fat)}g</span>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-3.5">
-                                <span className="font-mono font-extrabold text-xs text-zinc-950 dark:text-zinc-100">{Math.round(item.calories)} kcal</span>
-                                
-                                {/* Ajuste +/- */}
-                                <div className="flex items-center border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-white dark:bg-zinc-900">
-                                  <button onClick={() => handleAdjustLogQuantity(item, 'decrement')} className="px-2 py-0.5 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-bold">-</button>
-                                  <span className="px-1 text-[9px] font-bold text-zinc-400 border-x border-zinc-100 dark:border-zinc-800">Qtd</span>
-                                  <button onClick={() => handleAdjustLogQuantity(item, 'increment')} className="px-2 py-0.5 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-bold">+</button>
-                                </div>
-
-                                {/* Botão Equivalente */}
-                                <button
-                                  onClick={() => {
-                                    setSubstitutingItem(item);
-                                    setSubstituteSearchTerm('');
-                                    setSelectedSubstituteFood(null);
-                                    setSelectedMealForAdd(null);
-                                  }}
-                                  className="text-zinc-400 hover:text-indigo-500 p-1"
-                                  title="Substituir por equivalente"
-                                >
-                                  <RefreshCw className="w-3.5 h-3.5" />
-                                </button>
-
-                                {/* Remover */}
-                                <button onClick={() => handleDeleteLogItem(item.id)} className="text-zinc-400 hover:text-rose-500 p-1">
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
+                  return (
+                    <div key={mealName} className="border border-zinc-150 dark:border-zinc-800/80 rounded-2xl overflow-hidden shadow-sm">
+                      {/* Header */}
+                      <div className="px-4 py-3 bg-zinc-50 dark:bg-[#121216] border-b border-zinc-150 dark:border-zinc-800 flex justify-between items-center">
+                        <div>
+                          <span className="font-extrabold text-sm text-zinc-950 dark:text-zinc-50">{mealName}</span>
+                          <span className="text-[10px] text-zinc-400 ml-2 font-medium">({logs.length} alimentos)</span>
                         </div>
-                      )}
+                        <div className="flex items-center gap-4">
+                          <span className="font-mono font-bold text-xs text-zinc-900 dark:text-zinc-100">{mealCal} kcal</span>
+                          <button
+                            onClick={() => setSelectedMealForAdd(mealName)}
+                            className="p-1 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all cursor-pointer"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Itens */}
+                      <div className="p-4 space-y-3">
+                        {logs.length === 0 ? (
+                          <p className="text-xs text-zinc-400 italic py-1">Nenhum alimento registrado nesta refeição.</p>
+                        ) : (
+                          <div className="space-y-3.5">
+                            {logs.map((item) => (
+                              <div key={item.id} className="flex justify-between items-start gap-4 pb-3 border-b border-zinc-100 dark:border-zinc-900 last:border-0 last:pb-0">
+                                <div className="space-y-0.5">
+                                  <span className="font-semibold text-xs text-zinc-850 dark:text-zinc-200">{item.food_name}</span>
+                                  <div className="flex items-center gap-2 text-[10px] text-zinc-400">
+                                    <span>
+                                      {item.quantity}g
+                                      {item.food_name?.toLowerCase().includes('ovo') && ` (~${(Number(item.quantity) / 50).toFixed(1).replace('.0', '')} unid)`}
+                                    </span>
+                                    <span>•</span>
+                                    <span>P: {Math.round(item.protein)}g</span>
+                                    <span>•</span>
+                                    <span>C: {Math.round(item.carbs)}g</span>
+                                    <span>•</span>
+                                    <span>G: {Math.round(item.fat)}g</span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-3.5">
+                                  <span className="font-mono font-extrabold text-xs text-zinc-950 dark:text-zinc-100">{Math.round(item.calories)} kcal</span>
+                                  
+                                  {/* Ajuste +/- */}
+                                  <div className="flex items-center border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-white dark:bg-zinc-900">
+                                    <button onClick={() => handleAdjustLogQuantity(item, 'decrement')} className="px-2.5 py-1 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-extrabold cursor-pointer">-</button>
+                                    <button
+                                      onClick={() => handleEditLogQuantityDirectly(item)}
+                                      className="px-2.5 py-1 text-[9px] font-bold text-zinc-700 dark:text-zinc-300 border-x border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-500 transition-colors cursor-pointer"
+                                      title={lang === 'pt' ? 'Clique para alterar a quantidade' : 'Click to edit quantity'}
+                                    >
+                                      {Number(item.quantity).toFixed(0)}g
+                                    </button>
+                                    <button onClick={() => handleAdjustLogQuantity(item, 'increment')} className="px-2.5 py-1 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-extrabold cursor-pointer">+</button>
+                                  </div>
+
+                                  {/* Botão Equivalente */}
+                                  <button
+                                    onClick={() => {
+                                      setSubstitutingItem(item);
+                                      setSubstituteSearchTerm('');
+                                      setSelectedSubstituteFood(null);
+                                      setSelectedMealForAdd(null);
+                                    }}
+                                    className="text-zinc-400 hover:text-indigo-500 p-1"
+                                    title="Substituir por equivalente"
+                                  >
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                  </button>
+
+                                  {/* Remover */}
+                                  <button onClick={() => handleDeleteLogItem(item.id)} className="text-zinc-400 hover:text-rose-500 p-1">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })
+                  );
+                });
+              })()
             )}
           </div>
 
@@ -1542,6 +1726,34 @@ export default function DietPlanner({
                 </div>
               </div>
 
+              {/* Preferências Alimentares (Refeições e Whey) */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Refeições por dia' : 'Meals per day'}</label>
+                  <select
+                    value={recalculateForm.mealsPerDay}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, mealsPerDay: Number(e.target.value) })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 focus:outline-none"
+                  >
+                    <option value={3}>{lang === 'pt' ? '3 refeições' : '3 meals'}</option>
+                    <option value={4}>{lang === 'pt' ? '4 refeições' : '4 meals'}</option>
+                    <option value={5}>{lang === 'pt' ? '5 refeições' : '5 meals'}</option>
+                    <option value={6}>{lang === 'pt' ? '6 refeições' : '6 meals'}</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Incluir Whey Protein?' : 'Include Whey?'}</label>
+                  <select
+                    value={recalculateForm.useWhey ? 'yes' : 'no'}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, useWhey: e.target.value === 'yes' })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 focus:outline-none"
+                  >
+                    <option value="yes">{lang === 'pt' ? 'Sim, utilizar' : 'Yes, use'}</option>
+                    <option value="no">{lang === 'pt' ? 'Não utilizar' : 'No, do not use'}</option>
+                  </select>
+                </div>
+              </div>
+
               {/* O que Re-gerar (Checkboxes) */}
               <div className="bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-100 dark:border-zinc-800/80 rounded-2xl p-3.5 space-y-2.5">
                 <span className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider block">
@@ -1584,6 +1796,57 @@ export default function DietPlanner({
                   className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-extrabold shadow-md cursor-pointer transition-all"
                 >
                   {lang === 'pt' ? 'Confirmar e Recalcular' : 'Confirm & Recalculate'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Customizado para Edição de Quantidade (g) */}
+      {editingLogItem && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-sm shadow-xl space-y-4 animate-scale-up">
+            <div className="text-center space-y-2">
+              <h3 className="text-lg font-extrabold text-zinc-950 dark:text-zinc-50">
+                {lang === 'pt' ? 'Alterar Quantidade' : 'Edit Quantity'}
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                {lang === 'pt' 
+                  ? `Altere a quantidade consumida de "${editingLogItem.food_name}"` 
+                  : `Edit quantity consumed for "${editingLogItem.food_name}"`}
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveQuantityModal} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block text-center">
+                  {lang === 'pt' ? 'Quantidade em gramas (g)' : 'Quantity in grams (g)'}
+                </label>
+                <input
+                  type="number"
+                  required
+                  autoFocus
+                  placeholder="Ex: 160"
+                  value={editingQuantity}
+                  onChange={(e) => setEditingQuantity(e.target.value)}
+                  className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-lg font-bold text-center text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingLogItem(null)}
+                  className="flex-1 py-3 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl text-xs font-bold text-zinc-500 dark:text-zinc-400 transition-all cursor-pointer"
+                >
+                  {lang === 'pt' ? 'Cancelar' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-extrabold shadow-md transition-all cursor-pointer"
+                >
+                  {lang === 'pt' ? 'Salvar' : 'Save'}
                 </button>
               </div>
             </form>
