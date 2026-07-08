@@ -1,7 +1,13 @@
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const dbHost = process.env.DB_HOST || 'localhost';
 const dbUser = process.env.DB_USER || 'root';
@@ -40,6 +46,9 @@ export async function initDatabase() {
 
     // 4. Executar a criação das tabelas se elas não existirem
     await createTables();
+
+    // 5. Popular a tabela de alimentos se necessário
+    await seedFoodsTableIfNeeded();
 
     console.log('Banco de dados inicializado com sucesso.');
     return pool;
@@ -162,6 +171,19 @@ async function createTables() {
       logged_date DATE NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB;`,
+
+    // Tabela: Foods (Catálogo geral da TACO para consulta)
+    `CREATE TABLE IF NOT EXISTS foods (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      calories INT NOT NULL,
+      protein DECIMAL(5,2) NOT NULL,
+      carbs DECIMAL(5,2) NOT NULL,
+      fat DECIMAL(5,2) NOT NULL,
+      serving_size VARCHAR(50) DEFAULT '100g',
+      category VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB;`
   ];
 
@@ -169,6 +191,97 @@ async function createTables() {
     await pool.query(query);
   }
   console.log('Tabelas verificadas/criadas com sucesso no MySQL.');
+}
+
+async function seedFoodsTableIfNeeded() {
+  try {
+    const [rows] = await pool.query('SELECT COUNT(*) as count FROM foods');
+    if (rows[0].count > 0) {
+      console.log('Tabela de alimentos (foods) já possui dados. Pulando seed.');
+      return;
+    }
+
+    console.log('Populando tabela de alimentos a partir do CSV da TACO...');
+    const csvPath = path.resolve(__dirname, '../../doc/Taco-4a-Edicao(CMVCol taco3).csv');
+
+    if (!fs.existsSync(csvPath)) {
+      console.warn(`Arquivo CSV da TACO não encontrado em: ${csvPath}. Pulando seed.`);
+      return;
+    }
+
+    const content = fs.readFileSync(csvPath, 'latin1');
+    const lines = content.split(/\r?\n/);
+    
+    let currentCategory = '';
+    const foodsToInsert = [];
+
+    const ignoreKeywords = [
+      'número do', 'nmero do', 'descrição dos alimentos', 'descrio dos alimentos',
+      'umidade', 'energia', 'proteína', 'protena', 'lipídeos', 'lipdeos',
+      'carboidrato', 'taco', 'legenda', 'cinzas', 'colesterol', 'fibra'
+    ];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      const parts = line.split(';');
+      const firstPart = parts[0]?.trim();
+      const secondPart = parts[1]?.trim();
+
+      if (!firstPart) continue;
+
+      const isHeader = ignoreKeywords.some(keyword => 
+        firstPart.toLowerCase().includes(keyword) || 
+        (secondPart && secondPart.toLowerCase().includes(keyword))
+      );
+
+      if (isHeader) continue;
+
+      const hasOnlyFirstPart = parts.slice(1).every(p => !p.trim());
+      if (hasOnlyFirstPart && isNaN(Number(firstPart))) {
+        currentCategory = firstPart;
+        continue;
+      }
+
+      const id = Number(firstPart);
+      if (!isNaN(id) && id > 0) {
+        const name = parts[1]?.trim();
+        if (!name) continue;
+
+        const cleanValue = (val) => {
+          if (!val) return 0;
+          const cleaned = val.trim().replace(',', '.');
+          if (cleaned === 'NA' || cleaned === 'Tr' || cleaned === '*' || cleaned === '-') return 0;
+          const num = parseFloat(cleaned);
+          return isNaN(num) ? 0 : num;
+        };
+
+        const calories = Math.round(cleanValue(parts[3]));
+        const protein = cleanValue(parts[5]);
+        const fat = cleanValue(parts[6]);
+        const carbs = cleanValue(parts[8]);
+
+        foodsToInsert.push([
+          name,
+          calories,
+          protein,
+          carbs,
+          fat,
+          '100g',
+          currentCategory || 'Geral'
+        ]);
+      }
+    }
+
+    if (foodsToInsert.length > 0) {
+      const query = 'INSERT INTO foods (name, calories, protein, carbs, fat, serving_size, category) VALUES ?';
+      await pool.query(query, [foodsToInsert]);
+      console.log(`Sucesso: ${foodsToInsert.length} alimentos da TACO cadastrados no MySQL.`);
+    }
+  } catch (error) {
+    console.error('Erro ao popular a tabela de alimentos (seed):', error);
+  }
 }
 
 export function getPool() {

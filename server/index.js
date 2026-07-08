@@ -7,6 +7,7 @@ import trackerRoutes from './routes/tracker.js';
 import dietTrackerRoutes from './routes/dietTracker.js';
 import dietRoutes from './routes/diet.js';
 import workoutRoutes from './routes/workout.js';
+import foodsRoutes from './routes/foods.js';
 
 import os from 'os';
 
@@ -25,6 +26,7 @@ app.use('/api/tracker', trackerRoutes);
 app.use('/api/tracker/diet', dietTrackerRoutes);
 app.use('/api/diet', dietRoutes);
 app.use('/api/workout', workoutRoutes);
+app.use('/api/foods', foodsRoutes);
 
 // Rota base de verificação de status
 app.get('/health', (req, res) => {

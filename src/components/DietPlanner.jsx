@@ -28,6 +28,7 @@ export default function DietPlanner({
   diet, 
   setDiet, 
   profile, 
+  setProfile,
   lang = 'pt', 
   activeDate, 
   setActiveDate, 
@@ -41,6 +42,30 @@ export default function DietPlanner({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFood, setSelectedFood] = useState(null);
   const [selectedQuantity, setSelectedQuantity] = useState(100);
+  const [searchQueryResults, setSearchQueryResults] = useState([]);
+
+  // Estados para edição rápida de calorias e macros
+  const [showEditCaloriesModal, setShowEditCaloriesModal] = useState(false);
+  const [editCaloriesForm, setEditCaloriesForm] = useState({
+    targetCalories: profile?.targetCalories || 2000,
+    protein: profile?.macros?.protein || 150,
+    carbs: profile?.macros?.carbs || 200,
+    fat: profile?.macros?.fat || 60
+  });
+
+  // Estados para o Modal de Recálculo do Plano
+  const [showRecalculateModal, setShowRecalculateModal] = useState(false);
+  const [recalculateForm, setRecalculateForm] = useState({
+    gender: profile?.gender || 'masculino',
+    age: profile?.age || 30,
+    weight: profile?.weight || 80,
+    height: profile?.height || 170,
+    activityLevel: profile?.activityLevel || 'moderado',
+    goal: profile?.goal || 'emagrecimento',
+    workoutDays: profile?.workoutDays || 4,
+    regenerateDiet: true,
+    regenerateWorkout: false
+  });
 
   // Estado para cadastro de alimento customizado no modal do plano base
   const [customFoodForm, setCustomFoodForm] = useState({
@@ -62,33 +87,122 @@ export default function DietPlanner({
 
   // Estados para Substituição por Equivalência
   const [substitutingItem, setSubstitutingItem] = useState(null);
+  const [isSubstitutingBasePlan, setIsSubstitutingBasePlan] = useState(false);
   const [substituteSearchTerm, setSubstituteSearchTerm] = useState('');
   const [substituteSearchResults, setSubstituteSearchResults] = useState([]);
   const [selectedSubstituteFood, setSelectedSubstituteFood] = useState(null);
 
+  // Sincronizar dados do perfil
+  useEffect(() => {
+    if (profile) {
+      setEditCaloriesForm({
+        targetCalories: profile.targetCalories || 2000,
+        protein: profile.macros?.protein || 150,
+        carbs: profile.macros?.carbs || 200,
+        fat: profile.macros?.fat || 60
+      });
+      setRecalculateForm(prev => ({
+        ...prev,
+        gender: profile.gender || 'masculino',
+        age: profile.age || 30,
+        weight: profile.weight || 80,
+        height: profile.height || 170,
+        activityLevel: profile.activityLevel || 'moderado',
+        goal: profile.goal || 'emagrecimento',
+        workoutDays: profile.workoutDays || 4
+      }));
+    }
+  }, [profile]);
+
   // Buscar alimentos para o Diário Alimentar
   useEffect(() => {
-    if (searchTerm.trim() === '') {
-      setSearchResults([]);
-      return;
-    }
-    const filtered = initialFoodDatabase.filter(food => 
-      food.name.toLowerCase().includes(searchTerm.toLowerCase())
-    ).slice(0, 5);
-    setSearchResults(filtered);
+    let active = true;
+    const searchFoods = async () => {
+      if (searchTerm.trim() === '') {
+        setSearchResults([]);
+        return;
+      }
+      try {
+        const res = await axios.get('/api/foods', { params: { q: searchTerm } });
+        if (active) {
+          setSearchResults(res.data.slice(0, 15));
+        }
+      } catch (err) {
+        console.error('Erro ao buscar alimentos da API no diário:', err);
+        // Fallback local
+        const filtered = initialFoodDatabase.filter(food => 
+          food.name.toLowerCase().includes(searchTerm.toLowerCase())
+        ).slice(0, 15);
+        if (active) setSearchResults(filtered);
+      }
+    };
+
+    searchFoods();
+    return () => { active = false; };
   }, [searchTerm]);
 
   // Buscar alimentos para Substituição
   useEffect(() => {
-    if (substituteSearchTerm.trim() === '') {
-      setSubstituteSearchResults([]);
-      return;
-    }
-    const filtered = initialFoodDatabase.filter(food => 
-      food.name.toLowerCase().includes(substituteSearchTerm.toLowerCase())
-    ).slice(0, 5);
-    setSubstituteSearchResults(filtered);
+    let active = true;
+    const searchSubstituteFoods = async () => {
+      if (substituteSearchTerm.trim() === '') {
+        setSubstituteSearchResults([]);
+        return;
+      }
+      try {
+        const res = await axios.get('/api/foods', { params: { q: substituteSearchTerm } });
+        if (active) {
+          setSubstituteSearchResults(res.data.slice(0, 15));
+        }
+      } catch (err) {
+        console.error('Erro ao buscar alimentos da API para substituição:', err);
+        // Fallback local
+        const filtered = initialFoodDatabase.filter(food => 
+          food.name.toLowerCase().includes(substituteSearchTerm.toLowerCase())
+        ).slice(0, 15);
+        if (active) setSubstituteSearchResults(filtered);
+      }
+    };
+
+    searchSubstituteFoods();
+    return () => { active = false; };
   }, [substituteSearchTerm]);
+
+  // Buscar alimentos para o Modal do Plano Base
+  useEffect(() => {
+    let active = true;
+    const searchBaseFoods = async () => {
+      if (searchQuery.trim() === '') {
+        setSearchQueryResults([]);
+        return;
+      }
+      try {
+        const res = await axios.get('/api/foods', { params: { q: searchQuery } });
+        if (active) {
+          setSearchQueryResults(res.data.slice(0, 15));
+        }
+      } catch (err) {
+        console.error('Erro ao buscar alimentos da API no plano base:', err);
+        // Fallback local
+        const filtered = initialFoodDatabase.filter(food => 
+          food.name.toLowerCase().includes(searchQuery.toLowerCase())
+        ).slice(0, 15);
+        if (active) setSearchQueryResults(filtered);
+      }
+    };
+
+    searchBaseFoods();
+    return () => { active = false; };
+  }, [searchQuery]);
+
+  // Abrir modal de adição de alimento
+  const openAddFood = (mealIdx) => {
+    setActiveMealIndex(mealIdx);
+    setShowAddFoodModal(true);
+    setSearchQuery('');
+    setSelectedFood(null);
+    setSelectedQuantity(100);
+  };
 
   // ==========================================
   // AÇÕES DO PLANO RECOMENDADO (BASE)
@@ -291,30 +405,201 @@ export default function DietPlanner({
     }
   };
 
-  // Substituir por equivalente calórico
+  // Substituir por equivalente calórico (no Diário ou no Plano Base)
   const handleReplaceFoodWithEquivalent = async (e) => {
     e.preventDefault();
     if (!substitutingItem || !selectedSubstituteFood) return;
-    const originalCalories = substitutingItem.calories;
+
+    // As calorias originais do item a ser substituído (calculadas proporcionais à gramagem atual)
+    let originalCalories = substitutingItem.calories;
+    if (isSubstitutingBasePlan) {
+      originalCalories = Math.round((substitutingItem.calories * substitutingItem.quantity) / 100);
+    }
+
     const newFoodCal100g = selectedSubstituteFood.calories;
-    if (newFoodCal100g <= 0) return alert('Alimento inválido');
+    if (newFoodCal100g <= 0) return alert(lang === 'pt' ? 'Alimento inválido' : 'Invalid food');
+
     const equivalentQuantity = Math.round((originalCalories * 100) / newFoodCal100g);
     const ratio = equivalentQuantity / 100;
+
     try {
-      await axios.put(`/api/tracker/diet/${substitutingItem.id}`, {
-        food_name: selectedSubstituteFood.name,
-        quantity: equivalentQuantity,
-        protein: selectedSubstituteFood.protein * ratio,
-        carbs: selectedSubstituteFood.carbs * ratio,
-        fat: selectedSubstituteFood.fat * ratio,
-        calories: originalCalories,
-      });
+      if (isSubstitutingBasePlan) {
+        // Atualizar no Plano Base
+        await axios.put(`/api/diet/meal/${substitutingItem.mealId}/item/${substitutingItem.id}`, {
+          name: selectedSubstituteFood.name,
+          quantity: equivalentQuantity,
+          protein: selectedSubstituteFood.protein,
+          carbs: selectedSubstituteFood.carbs,
+          fat: selectedSubstituteFood.fat,
+          calories: selectedSubstituteFood.calories
+        });
+
+        // Sincronizar plano base localmente na hora
+        const updatedDiet = { ...diet };
+        const mealIdx = updatedDiet.meals.findIndex(m => m.id === substitutingItem.mealId);
+        if (mealIdx !== -1) {
+          const itemIdx = updatedDiet.meals[mealIdx].items.findIndex(i => i.id === substitutingItem.id);
+          if (itemIdx !== -1) {
+            updatedDiet.meals[mealIdx].items[itemIdx] = {
+              id: substitutingItem.id,
+              name: selectedSubstituteFood.name,
+              quantity: equivalentQuantity,
+              protein: selectedSubstituteFood.protein,
+              carbs: selectedSubstituteFood.carbs,
+              fat: selectedSubstituteFood.fat,
+              calories: selectedSubstituteFood.calories
+            };
+          }
+        }
+        setDiet(updatedDiet);
+      } else {
+        // Atualizar no Diário Alimentar
+        await axios.put(`/api/tracker/diet/${substitutingItem.id}`, {
+          food_name: selectedSubstituteFood.name,
+          quantity: equivalentQuantity,
+          protein: selectedSubstituteFood.protein * ratio,
+          carbs: selectedSubstituteFood.carbs * ratio,
+          fat: selectedSubstituteFood.fat * ratio,
+          calories: originalCalories,
+        });
+        onRefreshData();
+      }
+
       setSubstitutingItem(null);
       setSubstituteSearchTerm('');
       setSelectedSubstituteFood(null);
-      onRefreshData();
+      setIsSubstitutingBasePlan(false);
     } catch (err) {
-      console.error(err);
+      console.error('Erro ao substituir alimento:', err);
+    }
+  };
+
+  // Salvar edição direta de calorias e macros
+  const handleSaveQuickCalories = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await axios.put('/api/auth/profile/calories', {
+        targetCalories: Number(editCaloriesForm.targetCalories),
+        protein: Number(editCaloriesForm.protein),
+        carbs: Number(editCaloriesForm.carbs),
+        fat: Number(editCaloriesForm.fat)
+      });
+      setProfile(res.data.profile);
+      setShowEditCaloriesModal(false);
+      onRefreshData();
+
+      if (window.confirm(lang === 'pt' ? 'Deseja recalcular e re-gerar automaticamente as porções do seu Plano Recomendado de Dieta para bater as novas metas?' : 'Would you like to automatically recalculate and regenerate your Base Recommended Plan portions to match the new targets?')) {
+        const presetRes = await axios.post('/api/diet/preset', { presetKey: res.data.profile.goal });
+        setDiet(presetRes.data);
+      }
+    } catch (err) {
+      console.error('Erro ao atualizar metas calóricas:', err);
+      alert(lang === 'pt' ? 'Erro ao salvar novas metas.' : 'Error saving targets.');
+    }
+  };
+
+  // Confirmar e recalcular plano completo (dieta, treino ou ambos)
+  const handleConfirmRecalculate = async (e) => {
+    e.preventDefault();
+    
+    const genderVal = recalculateForm.gender;
+    const ageVal = Number(recalculateForm.age);
+    const weightVal = Number(recalculateForm.weight);
+    const heightVal = Number(recalculateForm.height);
+    const activityLevelFactor = Number(recalculateForm.activityLevel);
+    const goalVal = recalculateForm.goal;
+    const workoutDaysVal = Number(recalculateForm.workoutDays);
+
+    // TMB (Mifflin-St Jeor)
+    let calculatedBmr = 0;
+    if (genderVal === 'masculino' || genderVal === 'male') {
+      calculatedBmr = 10 * weightVal + 6.25 * heightVal - 5 * ageVal + 5;
+    } else {
+      calculatedBmr = 10 * weightVal + 6.25 * heightVal - 5 * ageVal - 161;
+    }
+
+    // TDEE
+    const calculatedTdee = Math.round(calculatedBmr * activityLevelFactor);
+
+    // Ajuste calórico por objetivo
+    let calculatedTargetCalories = calculatedTdee;
+    if (goalVal === 'emagrecimento') {
+      calculatedTargetCalories = Math.round(calculatedTdee - 500);
+      if (calculatedTargetCalories < calculatedBmr * 0.9) {
+        calculatedTargetCalories = Math.round(calculatedBmr * 0.9);
+      }
+    } else if (goalVal === 'hipertrofia') {
+      calculatedTargetCalories = Math.round(calculatedTdee + 300);
+    }
+
+    // Macros alvos
+    let pMultiplier = 2.0;
+    let fMultiplier = 0.9;
+    if (goalVal === 'emagrecimento') {
+      pMultiplier = 2.2;
+      fMultiplier = 0.8;
+    } else if (goalVal === 'hipertrofia') {
+      pMultiplier = 2.0;
+      fMultiplier = 1.0;
+    } else {
+      pMultiplier = 1.8;
+      fMultiplier = 0.9;
+    }
+
+    const proteinGrams = Math.round(weightVal * pMultiplier);
+    const fatGrams = Math.round(weightVal * fMultiplier);
+    const proteinCalories = proteinGrams * 4;
+    const fatCalories = fatGrams * 9;
+    const remainingCalories = calculatedTargetCalories - proteinCalories - fatCalories;
+    const carbGrams = Math.round(remainingCalories > 0 ? remainingCalories / 4 : 50);
+
+    try {
+      // 1. Atualizar perfil com novos dados e macros recalculados
+      const profileRes = await axios.put('/api/auth/profile', {
+        gender: genderVal,
+        age: ageVal,
+        weight: weightVal,
+        height: heightVal,
+        activityLevel: activityLevelFactor,
+        goal: goalVal,
+        workoutDays: workoutDaysVal,
+        bmr: calculatedBmr,
+        tdee: calculatedTdee,
+        targetCalories: calculatedTargetCalories,
+        macros: {
+          protein: proteinGrams,
+          carbs: carbGrams,
+          fat: fatGrams
+        }
+      });
+
+      // Atualizar perfil global no frontend
+      setProfile(profileRes.data.profile);
+
+      // 2. Re-gerar Dieta
+      if (recalculateForm.regenerateDiet) {
+        const dietRes = await axios.post('/api/diet/preset', { presetKey: goalVal });
+        setDiet(dietRes.data);
+      }
+
+      // 3. Re-gerar Treino
+      if (recalculateForm.regenerateWorkout) {
+        let presetKey = 'upperlower4x';
+        if (workoutDaysVal <= 3) {
+          presetKey = 'fullbody3x';
+        } else if (workoutDaysVal >= 5) {
+          presetKey = 'ppl6x';
+        }
+        await axios.post('/api/workout/preset', { presetKey });
+      }
+
+      // 4. Finalizar
+      setShowRecalculateModal(false);
+      onRefreshData();
+      alert(lang === 'pt' ? 'Plano recalculado com sucesso!' : 'Plan successfully recalculated!');
+    } catch (err) {
+      console.error('Erro ao recalcular plano:', err);
+      alert(lang === 'pt' ? 'Erro ao recalcular plano.' : 'Error recalculating plan.');
     }
   };
 
@@ -388,6 +673,16 @@ export default function DietPlanner({
             {lang === 'pt' ? 'Compare seu plano padrão recomendado (Aside) com seu diário real (Body) e gerencie sua dieta.' : 'Compare planned macros vs real intake.'}
           </p>
         </div>
+
+        <div>
+          <button
+            onClick={() => setShowRecalculateModal(true)}
+            className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-extrabold rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw className="w-4 h-4" />
+            {lang === 'pt' ? 'Recalcular Plano' : 'Recalculate Plan'}
+          </button>
+        </div>
       </div>
 
       {/* Grid Central Lado a Lado (ASIDE + BODY) */}
@@ -401,9 +696,20 @@ export default function DietPlanner({
                 <FileText className="w-4 h-4 text-zinc-400" />
                 {lang === 'pt' ? 'Plano Recomendado' : 'Base Plan'}
               </h3>
-              <span className="text-[10px] text-zinc-400 font-bold block mt-0.5">
-                {profile.targetCalories} kcal • P:{profile.macros.protein}g C:{profile.macros.carbs}g
-              </span>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-[10px] text-zinc-400 font-bold">
+                  {profile.targetCalories} kcal • P:{profile.macros.protein}g C:{profile.macros.carbs}g
+                </span>
+                {isEditingBasePlan && (
+                  <button 
+                    onClick={() => setShowEditCaloriesModal(true)}
+                    className="p-0.5 hover:bg-zinc-150 dark:hover:bg-zinc-800 rounded text-blue-500 cursor-pointer"
+                    title={lang === 'pt' ? "Ajustar calorias/macros" : "Adjust calories/macros"}
+                  >
+                    <Edit2 className="w-2.5 h-2.5" />
+                  </button>
+                )}
+              </div>
             </div>
             
             <button
@@ -455,14 +761,38 @@ export default function DietPlanner({
                                   <Plus className="w-3.5 h-3.5" />
                                 </button>
                               ) : (
-                                /* Se estiver editando: Botão de Excluir do plano padrão */
-                                <button
-                                  onClick={() => handleRemoveFood(mealIdx, itemIdx)}
-                                  className="p-1 hover:bg-rose-500/10 rounded-lg text-rose-500 transition-all cursor-pointer"
-                                  title="Remover do plano padrão"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                <div className="flex items-center gap-1">
+                                  {/* Botão de Substituição no plano base */}
+                                  <button
+                                    onClick={() => {
+                                      setSubstitutingItem({
+                                        id: item.id,
+                                        mealId: meal.id,
+                                        food_name: item.name,
+                                        quantity: item.quantity,
+                                        protein: item.protein,
+                                        carbs: item.carbs,
+                                        fat: item.fat,
+                                        calories: item.calories
+                                      });
+                                      setIsSubstitutingBasePlan(true);
+                                      setSubstituteSearchTerm('');
+                                      setSelectedSubstituteFood(null);
+                                    }}
+                                    className="p-1 hover:bg-indigo-500/10 rounded-lg text-indigo-500 transition-all cursor-pointer"
+                                    title={lang === 'pt' ? 'Substituir por equivalente' : 'Swap food'}
+                                  >
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                  </button>
+                                  {/* Botão de Excluir do plano padrão */}
+                                  <button
+                                    onClick={() => handleRemoveFood(mealIdx, itemIdx)}
+                                    className="p-1 hover:bg-rose-500/10 rounded-lg text-rose-500 transition-all cursor-pointer"
+                                    title="Remover do plano padrão"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           </div>
@@ -539,116 +869,45 @@ export default function DietPlanner({
             </div>
           </div>
 
-          {/* Seletor de Refeição ativa para Adicionar Alimento no Diário */}
+          {/* Seletor de Refeição ativa para Adicionar Alimento no Diário (Modal) */}
           {selectedMealForAdd && (
-            <div className="p-4 rounded-xl border border-blue-500/20 bg-blue-500/5 space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-blue-500 uppercase tracking-wider flex items-center gap-1.5">
-                  <PlusCircle className="w-4 h-4" />
-                  {lang === 'pt' ? `Adicionar ao ${selectedMealForAdd}` : `Add to ${selectedMealForAdd}`}
-                </span>
-                <button 
-                  onClick={() => { setSelectedMealForAdd(null); setSelectedDiaryFood(null); setSearchTerm(''); }}
-                  className="text-xs font-bold text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
-                >
-                  {lang === 'pt' ? 'Cancelar' : 'Cancel'}
-                </button>
-              </div>
-
-              <form onSubmit={handleAddDiaryFood} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                <div className="md:col-span-2 space-y-1.5 relative">
-                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Buscar Alimento</label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-3 w-4 h-4 text-zinc-400" />
-                    <input
-                      type="text"
-                      placeholder={lang === 'pt' ? "Digite batata, frango..." : "Search food..."}
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-9 pr-4 py-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none"
-                    />
-                  </div>
-
-                  {searchResults.length > 0 && (
-                    <div className="absolute z-20 bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg mt-1 w-full max-w-[400px] overflow-hidden">
-                      {searchResults.map((food) => (
-                        <button
-                          key={food.id}
-                          type="button"
-                          onClick={() => { setSelectedDiaryFood(food); setSearchTerm(food.name); setSearchResults([]); }}
-                          className="w-full text-left px-4 py-2.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-800 dark:text-zinc-200 border-b border-zinc-100 dark:border-zinc-900 last:border-0 block"
-                        >
-                          <span className="font-bold">{food.name}</span>
-                          <span className="text-[10px] text-zinc-400 block mt-0.5">{food.calories} kcal / 100g</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex gap-2">
-                  <div className="flex-1 space-y-1.5">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Quantidade (g)</label>
-                    <input
-                      type="number"
-                      value={foodQuantity}
-                      onChange={(e) => setFoodQuantity(e.target.value)}
-                      className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none"
-                    />
-                  </div>
-                  <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl shadow-sm h-[38px] cursor-pointer">
-                    Adicionar
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 w-full max-w-md shadow-xl space-y-4 animate-scale-up">
+                <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-850 pb-3">
+                  <h3 className="font-extrabold text-md text-zinc-950 dark:text-zinc-50 flex items-center gap-1.5">
+                    <PlusCircle className="w-5 h-5 text-blue-500" />
+                    {lang === 'pt' ? `Adicionar ao ${selectedMealForAdd}` : `Add to ${selectedMealForAdd}`}
+                  </h3>
+                  <button 
+                    onClick={() => { setSelectedMealForAdd(null); setSelectedDiaryFood(null); setSearchTerm(''); }}
+                    className="text-xs font-bold text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 cursor-pointer"
+                  >
+                    {lang === 'pt' ? 'Fechar' : 'Close'}
                   </button>
                 </div>
-              </form>
-            </div>
-          )}
 
-          {/* Substituição Inteligente por Equivalência Calórica */}
-          {substitutingItem && (
-            <div className="p-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4" />
-                  {lang === 'pt' ? `Substituir ${substitutingItem.food_name}` : `Swap ${substitutingItem.food_name}`}
-                </span>
-                <button 
-                  onClick={() => { setSubstitutingItem(null); setSelectedSubstituteFood(null); setSubstituteSearchTerm(''); }}
-                  className="text-xs font-bold text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
-                >
-                  {lang === 'pt' ? 'Cancelar' : 'Cancel'}
-                </button>
-              </div>
-
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                {lang === 'pt' 
-                  ? `Selecione um novo alimento para substituir as ${Math.round(substitutingItem.calories)} kcal de ${substitutingItem.quantity}g de ${substitutingItem.food_name}.`
-                  : `Select substitute for ${Math.round(substitutingItem.calories)} kcal.`}
-              </p>
-
-              <form onSubmit={handleReplaceFoodWithEquivalent} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                  <div className="md:col-span-2 space-y-1.5 relative">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Buscar Alimento Equivalente</label>
+                <form onSubmit={handleAddDiaryFood} className="space-y-4">
+                  <div className="space-y-1.5 relative">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Buscar Alimento</label>
                     <div className="relative">
-                      <Search className="absolute left-3 top-3.5 w-4 h-4 text-zinc-400" />
+                      <Search className="absolute left-3 top-3 w-4 h-4 text-zinc-400" />
                       <input
                         type="text"
-                        placeholder="Arroz integral, aveia, batata doce..."
-                        value={substituteSearchTerm}
-                        onChange={(e) => setSubstituteSearchTerm(e.target.value)}
-                        className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                        placeholder={lang === 'pt' ? "Digite batata, frango..." : "Search food..."}
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-9 pr-4 py-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none"
                       />
                     </div>
 
-                    {substituteSearchResults.length > 0 && (
-                      <div className="absolute z-20 bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg mt-1 w-full max-w-[400px] overflow-hidden">
-                        {substituteSearchResults.map((food) => (
+                    {searchResults.length > 0 && (
+                      <div className="absolute z-50 bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg mt-1 w-full overflow-hidden max-h-48 overflow-y-auto">
+                        {searchResults.map((food) => (
                           <button
                             key={food.id}
                             type="button"
-                            onClick={() => { setSelectedSubstituteFood(food); setSubstituteSearchTerm(food.name); setSubstituteSearchResults([]); }}
-                            className="w-full text-left px-4 py-2.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-800 dark:text-zinc-200 border-b border-zinc-100 dark:border-zinc-900 last:border-0 block"
+                            onClick={() => { setSelectedDiaryFood(food); setSearchTerm(food.name); setSearchResults([]); }}
+                            className="w-full text-left px-4 py-2.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-800 dark:text-zinc-200 border-b border-zinc-100 dark:border-zinc-900 last:border-0 block cursor-pointer"
                           >
                             <span className="font-bold">{food.name}</span>
                             <span className="text-[10px] text-zinc-400 block mt-0.5">{food.calories} kcal / 100g</span>
@@ -658,57 +917,144 @@ export default function DietPlanner({
                     )}
                   </div>
 
-                  <button
-                    type="submit"
-                    disabled={!selectedSubstituteFood}
-                    className="w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-extrabold text-xs rounded-xl shadow-sm h-[42px] cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <Check className="w-4 h-4" />
-                    Confirmar Troca
-                  </button>
+                  <div className="flex gap-3 items-end">
+                    <div className="flex-1 space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Quantidade (g)</label>
+                      <input
+                        type="number"
+                        value={foodQuantity}
+                        onChange={(e) => setFoodQuantity(e.target.value)}
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none font-bold"
+                      />
+                    </div>
+                    <button type="submit" className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl shadow-md h-[38px] cursor-pointer transition-all">
+                      Adicionar
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Substituição Inteligente por Equivalência Calórica (Modal) */}
+          {substitutingItem && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 w-full max-w-md shadow-xl space-y-4 animate-scale-up">
+                <div className="text-center space-y-2">
+                  <h3 className="text-lg font-extrabold text-indigo-600 dark:text-indigo-400 flex items-center justify-center gap-1.5">
+                    <Sparkles className="w-5 h-5 text-indigo-500" />
+                    {lang === 'pt' ? 'Substituição Equivalente' : 'Equivalent Swap'}
+                  </h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {lang === 'pt' 
+                      ? `Selecione um novo alimento para substituir as ${Math.round(substitutingItem.calories)} kcal de ${substitutingItem.quantity}g de "${substitutingItem.food_name}"` 
+                      : `Select a new food to replace the ${Math.round(substitutingItem.calories)} kcal of ${substitutingItem.quantity}g of "${substitutingItem.food_name}"`}
+                  </p>
                 </div>
 
-                {selectedSubstituteFood && (() => {
-                  const origCal = substitutingItem.calories;
-                  const targetCal = selectedSubstituteFood.calories;
-                  const equivQty = Math.round((origCal * 100) / targetCal);
-                  const r = equivQty / 100;
-                  return (
-                    <div className="p-3.5 bg-zinc-950 border border-zinc-850 rounded-xl space-y-2">
-                      <div className="flex justify-between items-center text-xs text-zinc-300">
-                        <span>
-                          {lang === 'pt' ? 'Equivalente calculado:' : 'Swap calculated:'}{' '}
-                          <strong className="text-indigo-400 font-extrabold">{equivQty}g de {selectedSubstituteFood.name}</strong>
-                        </span>
-                        <span className="text-[10px] font-mono bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded font-bold">
-                          {Math.round(origCal)} kcal
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2 text-[10px] border-t border-zinc-800/80 pt-2 text-zinc-400 font-mono">
-                        <div>
-                          <span>PROTEÍNAS:</span>
-                          <span className="block font-bold text-zinc-200">
-                            {Math.round(substitutingItem.protein)}g → <span className="text-rose-500">{Math.round(selectedSubstituteFood.protein * r)}g</span>
-                          </span>
-                        </div>
-                        <div>
-                          <span>CARBOS:</span>
-                          <span className="block font-bold text-zinc-200">
-                            {Math.round(substitutingItem.carbs)}g → <span className="text-blue-500">{Math.round(selectedSubstituteFood.carbs * r)}g</span>
-                          </span>
-                        </div>
-                        <div>
-                          <span>GORDURAS:</span>
-                          <span className="block font-bold text-zinc-200">
-                            {Math.round(substitutingItem.fat)}g → <span className="text-amber-500">{Math.round(selectedSubstituteFood.fat * r)}g</span>
-                          </span>
-                        </div>
-                      </div>
+                <form onSubmit={handleReplaceFoodWithEquivalent} className="space-y-4">
+                  <div className="space-y-1.5 relative">
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
+                      {lang === 'pt' ? 'Buscar Novo Alimento' : 'Search New Food'}
+                    </label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-3.5 w-4 h-4 text-zinc-400" />
+                      <input
+                        type="text"
+                        required
+                        autoFocus
+                        placeholder={lang === 'pt' ? "Substituir por aveia, batata, filé..." : "Substitute with potatoes, steak..."}
+                        value={substituteSearchTerm}
+                        onChange={(e) => setSubstituteSearchTerm(e.target.value)}
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                      />
                     </div>
-                  );
-                })()}
-              </form>
+
+                    {/* Resultados da busca */}
+                    {substituteSearchResults.length > 0 && (
+                      <div className="absolute z-50 bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg mt-1 w-full overflow-hidden max-h-48 overflow-y-auto">
+                        {substituteSearchResults.map((food) => (
+                          <button
+                            key={food.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedSubstituteFood(food);
+                              setSubstituteSearchTerm(food.name);
+                              setSubstituteSearchResults([]);
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-800 dark:text-zinc-200 border-b border-zinc-100 dark:border-zinc-900 last:border-0 block cursor-pointer"
+                          >
+                            <span className="font-bold">{food.name}</span>
+                            <span className="text-[10px] text-zinc-400 block mt-0.5">{food.calories} kcal / 100g (P: {food.protein}g C: {food.carbs}g G: {food.fat}g)</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Exibição do cálculo de equivalência */}
+                  {selectedSubstituteFood && (() => {
+                    const origCal = substitutingItem.calories;
+                    const targetCal = selectedSubstituteFood.calories;
+                    const equivQty = Math.round((origCal * 100) / targetCal);
+                    const r = equivQty / 100;
+                    
+                    return (
+                      <div className="p-3.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl space-y-3">
+                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                          <span className="text-xs text-zinc-655 dark:text-zinc-300">
+                            {lang === 'pt' ? 'Equivalente calculado:' : 'Calculated equivalent:'}{' '}
+                            <strong className="text-indigo-600 dark:text-indigo-400 text-sm font-extrabold block sm:inline">
+                              {equivQty}g de {selectedSubstituteFood.name}
+                            </strong>
+                          </span>
+                          <span className="text-[10px] font-mono bg-indigo-500/10 text-indigo-500 px-2 py-0.5 rounded font-bold self-start sm:self-center">
+                            {Math.round(origCal)} kcal
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2 text-[10px] border-t border-zinc-200 dark:border-zinc-800 pt-2 text-zinc-500 dark:text-zinc-400 font-mono">
+                          <div>
+                            <span>PROTEÍNAS:</span>
+                            <span className="block font-bold text-zinc-800 dark:text-zinc-200">
+                              {Math.round(substitutingItem.protein)}g → <span className="text-rose-500 font-extrabold">{Math.round(selectedSubstituteFood.protein * r)}g</span>
+                            </span>
+                          </div>
+                          <div>
+                            <span>CARBOS:</span>
+                            <span className="block font-bold text-zinc-800 dark:text-zinc-200">
+                              {Math.round(substitutingItem.carbs)}g → <span className="text-blue-500 font-extrabold">{Math.round(selectedSubstituteFood.carbs * r)}g</span>
+                            </span>
+                          </div>
+                          <div>
+                            <span>GORDURAS:</span>
+                            <span className="block font-bold text-zinc-800 dark:text-zinc-200">
+                              {Math.round(substitutingItem.fat)}g → <span className="text-amber-500 font-extrabold">{Math.round(selectedSubstituteFood.fat * r)}g</span>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => { setSubstitutingItem(null); setSelectedSubstituteFood(null); setSubstituteSearchTerm(''); }}
+                      className="flex-1 py-3 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl text-xs font-bold text-zinc-500 dark:text-zinc-400 transition-all cursor-pointer"
+                    >
+                      {lang === 'pt' ? 'Cancelar' : 'Cancel'}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!selectedSubstituteFood}
+                      className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold shadow-md transition-all cursor-pointer"
+                    >
+                      {lang === 'pt' ? 'Confirmar Troca' : 'Confirm Swap'}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
           )}
 
@@ -890,10 +1236,7 @@ export default function DietPlanner({
                 </div>
 
                 <div className="border border-zinc-100 dark:border-zinc-800 rounded-xl divide-y divide-zinc-100 dark:divide-zinc-800 max-h-[200px] overflow-y-auto">
-                  {initialFoodDatabase
-                    .filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
-                    .slice(0, 10)
-                    .map(food => (
+                  {searchQueryResults.map(food => (
                       <button
                         key={food.id}
                         onClick={() => setSelectedFood(food)}
@@ -1007,6 +1350,243 @@ export default function DietPlanner({
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Ajustar Metas Calóricas e Macros */}
+      {showEditCaloriesModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 w-full max-w-sm shadow-xl space-y-4 animate-scale-up">
+            <div className="text-center space-y-1">
+              <h3 className="text-md font-extrabold text-zinc-950 dark:text-zinc-50 flex items-center justify-center gap-1.5">
+                <Edit2 className="w-5 h-5 text-blue-500" />
+                {lang === 'pt' ? 'Ajustar Metas de Calorias e Macros' : 'Adjust Calories & Macros'}
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                {lang === 'pt' ? 'Edite diretamente suas calorias e macronutrientes alvos do perfil.' : 'Edit target values for daily intake.'}
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveQuickCalories} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Calorias Meta (kcal)' : 'Target Calories (kcal)'}</label>
+                <input
+                  type="number"
+                  required
+                  value={editCaloriesForm.targetCalories}
+                  onChange={(e) => setEditCaloriesForm({ ...editCaloriesForm, targetCalories: Number(e.target.value) })}
+                  className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Proteína (g)' : 'Protein (g)'}</label>
+                  <input
+                    type="number"
+                    required
+                    value={editCaloriesForm.protein}
+                    onChange={(e) => setEditCaloriesForm({ ...editCaloriesForm, protein: Number(e.target.value) })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-2 py-2 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Carbos (g)' : 'Carbs (g)'}</label>
+                  <input
+                    type="number"
+                    required
+                    value={editCaloriesForm.carbs}
+                    onChange={(e) => setEditCaloriesForm({ ...editCaloriesForm, carbs: Number(e.target.value) })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-2 py-2 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Gordura (g)' : 'Fat (g)'}</label>
+                  <input
+                    type="number"
+                    required
+                    value={editCaloriesForm.fat}
+                    onChange={(e) => setEditCaloriesForm({ ...editCaloriesForm, fat: Number(e.target.value) })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-2 py-2 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditCaloriesModal(false)}
+                  className="flex-1 py-2.5 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl text-xs font-bold text-zinc-550 dark:text-zinc-400 cursor-pointer"
+                >
+                  {lang === 'pt' ? 'Cancelar' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-extrabold shadow-md cursor-pointer"
+                >
+                  {lang === 'pt' ? 'Salvar' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Recálculo do Plano */}
+      {showRecalculateModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 w-full max-w-md shadow-xl space-y-4 animate-scale-up max-h-[90vh] overflow-y-auto">
+            <div className="text-center space-y-1">
+              <h3 className="text-lg font-extrabold text-zinc-950 dark:text-zinc-50 flex items-center justify-center gap-1.5">
+                <RefreshCw className="w-5 h-5 text-indigo-500" />
+                {lang === 'pt' ? 'Recalcular Dieta e Treino' : 'Recalculate Plan'}
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                {lang === 'pt' ? 'Responda abaixo para atualizar seus dados físicos e regerar seus planos.' : 'Answer below to update physical metrics and regenerate plans.'}
+              </p>
+            </div>
+
+            <form onSubmit={handleConfirmRecalculate} className="space-y-4 text-xs">
+              {/* Sexo e Idade */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Sexo' : 'Gender'}</label>
+                  <select
+                    value={recalculateForm.gender}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, gender: e.target.value })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 focus:outline-none"
+                  >
+                    <option value="masculino">{lang === 'pt' ? 'Masculino' : 'Male'}</option>
+                    <option value="feminino">{lang === 'pt' ? 'Feminino' : 'Female'}</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Idade (anos)' : 'Age (years)'}</label>
+                  <input
+                    type="number"
+                    required
+                    value={recalculateForm.age}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, age: Number(e.target.value) })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Peso e Altura */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Peso (kg)' : 'Weight (kg)'}</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    required
+                    value={recalculateForm.weight}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, weight: Number(e.target.value) })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Altura (cm)' : 'Height (cm)'}</label>
+                  <input
+                    type="number"
+                    required
+                    value={recalculateForm.height}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, height: Number(e.target.value) })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Nível de Atividade Física */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Nível de Atividade' : 'Activity Level'}</label>
+                <select
+                  value={recalculateForm.activityLevel}
+                  onChange={(e) => setRecalculateForm({ ...recalculateForm, activityLevel: Number(e.target.value) })}
+                  className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 focus:outline-none"
+                >
+                  <option value={1.2}>{lang === 'pt' ? 'Sedentário (Pouco/Sem exercício)' : 'Sedentary'}</option>
+                  <option value={1.375}>{lang === 'pt' ? 'Levemente Ativo (1-3 dias/semana)' : 'Lightly Active'}</option>
+                  <option value={1.55}>{lang === 'pt' ? 'Moderadamente Ativo (3-5 dias/semana)' : 'Moderately Active'}</option>
+                  <option value={1.725}>{lang === 'pt' ? 'Altamente Ativo (6-7 dias/semana)' : 'Very Active'}</option>
+                  <option value={1.9}>{lang === 'pt' ? 'Extremamente Ativo (Treino pesado diário)' : 'Extremely Active'}</option>
+                </select>
+              </div>
+
+              {/* Objetivo e Dias de Treino */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Objetivo' : 'Goal'}</label>
+                  <select
+                    value={recalculateForm.goal}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, goal: e.target.value })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 focus:outline-none"
+                  >
+                    <option value="emagrecimento">{lang === 'pt' ? 'Emagrecimento' : 'Fat Loss'}</option>
+                    <option value="manutencao">{lang === 'pt' ? 'Manutenção' : 'Maintenance'}</option>
+                    <option value="hipertrofia">{lang === 'pt' ? 'Hipertrofia' : 'Muscle Gain'}</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Dias de Treino/Semana' : 'Workout Days'}</label>
+                  <select
+                    value={recalculateForm.workoutDays}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, workoutDays: Number(e.target.value) })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 focus:outline-none"
+                  >
+                    <option value={3}>{lang === 'pt' ? '3 dias' : '3 days'}</option>
+                    <option value={4}>{lang === 'pt' ? '4 dias' : '4 days'}</option>
+                    <option value={5}>{lang === 'pt' ? '5 ou mais dias' : '5+ days'}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* O que Re-gerar (Checkboxes) */}
+              <div className="bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-100 dark:border-zinc-800/80 rounded-2xl p-3.5 space-y-2.5">
+                <span className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider block">
+                  {lang === 'pt' ? 'Escolha o que deseja re-gerar' : 'Choose what to regenerate'}
+                </span>
+                
+                <label className="flex items-center gap-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={recalculateForm.regenerateDiet}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, regenerateDiet: e.target.checked })}
+                    className="w-4 h-4 rounded text-blue-600 border-zinc-300 dark:border-zinc-800 bg-white dark:bg-zinc-900 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span>{lang === 'pt' ? 'Recalcular e Re-gerar Dieta Recomendada' : 'Regenerate Recommended Diet'}</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={recalculateForm.regenerateWorkout}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, regenerateWorkout: e.target.checked })}
+                    className="w-4 h-4 rounded text-blue-600 border-zinc-300 dark:border-zinc-800 bg-white dark:bg-zinc-900 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span>{lang === 'pt' ? 'Recalcular e Re-gerar Treino Recomendado' : 'Regenerate Recommended Workout'}</span>
+                </label>
+              </div>
+
+              {/* Ações */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRecalculateModal(false)}
+                  className="flex-1 py-2.5 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl text-xs font-bold text-zinc-550 dark:text-zinc-400 cursor-pointer"
+                >
+                  {lang === 'pt' ? 'Cancelar' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={!recalculateForm.regenerateDiet && !recalculateForm.regenerateWorkout}
+                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-extrabold shadow-md cursor-pointer transition-all"
+                >
+                  {lang === 'pt' ? 'Confirmar e Recalcular' : 'Confirm & Recalculate'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

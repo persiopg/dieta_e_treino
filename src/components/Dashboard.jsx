@@ -108,26 +108,56 @@ export default function Dashboard({
 
   // Buscar alimentos conforme digita
   useEffect(() => {
-    if (searchTerm.trim() === '') {
-      setSearchResults([]);
-      return;
-    }
-    const filtered = initialFoodDatabase.filter(food => 
-      food.name.toLowerCase().includes(searchTerm.toLowerCase())
-    ).slice(0, 5); // Limitar a 5 resultados
-    setSearchResults(filtered);
+    let active = true;
+    const searchFoods = async () => {
+      if (searchTerm.trim() === '') {
+        setSearchResults([]);
+        return;
+      }
+      try {
+        const res = await axios.get('/api/foods', { params: { q: searchTerm } });
+        if (active) {
+          setSearchResults(res.data.slice(0, 15));
+        }
+      } catch (err) {
+        console.error('Erro ao buscar alimentos da API:', err);
+        // Fallback local
+        const filtered = initialFoodDatabase.filter(food => 
+          food.name.toLowerCase().includes(searchTerm.toLowerCase())
+        ).slice(0, 15);
+        if (active) setSearchResults(filtered);
+      }
+    };
+
+    searchFoods();
+    return () => { active = false; };
   }, [searchTerm]);
 
   // Buscar alimentos para substituição conforme digita
   useEffect(() => {
-    if (substituteSearchTerm.trim() === '') {
-      setSubstituteSearchResults([]);
-      return;
-    }
-    const filtered = initialFoodDatabase.filter(food => 
-      food.name.toLowerCase().includes(substituteSearchTerm.toLowerCase())
-    ).slice(0, 5); // Limitar a 5 resultados
-    setSubstituteSearchResults(filtered);
+    let active = true;
+    const searchSubstituteFoods = async () => {
+      if (substituteSearchTerm.trim() === '') {
+        setSubstituteSearchResults([]);
+        return;
+      }
+      try {
+        const res = await axios.get('/api/foods', { params: { q: substituteSearchTerm } });
+        if (active) {
+          setSubstituteSearchResults(res.data.slice(0, 15));
+        }
+      } catch (err) {
+        console.error('Erro ao buscar alimentos da API:', err);
+        // Fallback local
+        const filtered = initialFoodDatabase.filter(food => 
+          food.name.toLowerCase().includes(substituteSearchTerm.toLowerCase())
+        ).slice(0, 15);
+        if (active) setSubstituteSearchResults(filtered);
+      }
+    };
+
+    searchSubstituteFoods();
+    return () => { active = false; };
   }, [substituteSearchTerm]);
 
   if (!profile) {

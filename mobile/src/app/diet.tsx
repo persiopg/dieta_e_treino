@@ -94,28 +94,126 @@ export default function DietScreen() {
     setRefreshing(false);
   };
 
-  // Filtragem de buscas locais de alimentos
+  // Filtragem de buscas locais de alimentos no SQLite (Multi-termo com score)
   useEffect(() => {
-    if (searchQuery.trim().length > 1) {
-      const filtered = initialFoodDatabase.filter((food: any) => 
-        food.name.toLowerCase().includes(searchQuery.toLowerCase())
-      ).slice(0, 8);
-      setSearchResults(filtered);
-    } else {
-      setSearchResults([]);
+    let active = true;
+    async function searchFoods() {
+      if (searchQuery.trim().length > 1) {
+        try {
+          const terms = searchQuery.trim().split(/\s+/)
+            .map(t => t.toLowerCase().replace(/[,.;()]/g, ''))
+            .filter(t => t.length > 2);
+
+          if (terms.length > 0) {
+            const whereClauses = terms.map(() => 'name LIKE ?');
+            const scoreClauses: string[] = [];
+            const finalParams: any[] = [];
+
+            // Pontuação por termo
+            terms.forEach(t => {
+              scoreClauses.push('(CASE WHEN name LIKE ? THEN 3 ELSE 0 END)');
+              finalParams.push(`%${t}%`);
+            });
+
+            // Se começar com primeiro termo
+            scoreClauses.push('(CASE WHEN name LIKE ? THEN 5 ELSE 0 END)');
+            finalParams.push(`${terms[0]}%`);
+
+            // Parâmetros do WHERE
+            terms.forEach(t => {
+              finalParams.push(`%${t}%`);
+            });
+
+            const query = `
+              SELECT id, name, calories, protein, carbs, fat, serving_size as servingSize, category,
+              (${scoreClauses.join(' + ')}) as score
+              FROM foods 
+              WHERE ${whereClauses.join(' OR ')}
+              ORDER BY score DESC, name ASC LIMIT 15
+            `;
+
+            const results = await db.getAllAsync<any>(query, finalParams);
+            if (active) {
+              setSearchResults(results);
+            }
+          } else {
+            if (active) setSearchResults([]);
+          }
+        } catch (err) {
+          console.error('Erro ao buscar alimentos no SQLite local:', err);
+          // Fallback para filtrar em memória
+          const filtered = initialFoodDatabase.filter((food: any) => 
+            food.name.toLowerCase().includes(searchQuery.toLowerCase())
+          ).slice(0, 15);
+          if (active) setSearchResults(filtered);
+        }
+      } else {
+        setSearchResults([]);
+      }
     }
-  }, [searchQuery]);
+    searchFoods();
+    return () => { active = false; };
+  }, [searchQuery, db]);
 
   useEffect(() => {
-    if (substituteSearchTerm.trim().length > 1) {
-      const filtered = initialFoodDatabase.filter((food: any) => 
-        food.name.toLowerCase().includes(substituteSearchTerm.toLowerCase())
-      ).slice(0, 5);
-      setSubstituteSearchResults(filtered);
-    } else {
-      setSubstituteSearchResults([]);
+    let active = true;
+    async function searchSubstituteFoods() {
+      if (substituteSearchTerm.trim().length > 1) {
+        try {
+          const terms = substituteSearchTerm.trim().split(/\s+/)
+            .map(t => t.toLowerCase().replace(/[,.;()]/g, ''))
+            .filter(t => t.length > 2);
+
+          if (terms.length > 0) {
+            const whereClauses = terms.map(() => 'name LIKE ?');
+            const scoreClauses: string[] = [];
+            const finalParams: any[] = [];
+
+            // Pontuação por termo
+            terms.forEach(t => {
+              scoreClauses.push('(CASE WHEN name LIKE ? THEN 3 ELSE 0 END)');
+              finalParams.push(`%${t}%`);
+            });
+
+            // Se começar com primeiro termo
+            scoreClauses.push('(CASE WHEN name LIKE ? THEN 5 ELSE 0 END)');
+            finalParams.push(`${terms[0]}%`);
+
+            // Parâmetros do WHERE
+            terms.forEach(t => {
+              finalParams.push(`%${t}%`);
+            });
+
+            const query = `
+              SELECT id, name, calories, protein, carbs, fat, serving_size as servingSize, category,
+              (${scoreClauses.join(' + ')}) as score
+              FROM foods 
+              WHERE ${whereClauses.join(' OR ')}
+              ORDER BY score DESC, name ASC LIMIT 15
+            `;
+
+            const results = await db.getAllAsync<any>(query, finalParams);
+            if (active) {
+              setSubstituteSearchResults(results);
+            }
+          } else {
+            if (active) setSubstituteSearchResults([]);
+          }
+        } catch (err) {
+          console.error('Erro ao buscar alimentos para substituição no SQLite local:', err);
+          // Fallback
+          const filtered = initialFoodDatabase.filter((food: any) => 
+            food.name.toLowerCase().includes(substituteSearchTerm.toLowerCase())
+          ).slice(0, 15);
+          if (active) setSubstituteSearchResults(filtered);
+        }
+      } else {
+        setSubstituteSearchResults([]);
+      }
     }
-  }, [substituteSearchTerm]);
+    searchSubstituteFoods();
+    return () => { active = false; };
+  }, [substituteSearchTerm, db]);
 
   // Navegação de Datas
   const handlePrevDay = () => {

@@ -19,17 +19,22 @@ import {
   ChevronRight,
   Edit2,
   FileText,
-  Trash
+  Trash,
+  RefreshCw
 } from 'lucide-react';
 
 export default function WorkoutPlanner({ 
   workout, 
   setWorkout, 
+  profile,
+  setProfile,
+  setDiet,
   loggedWorkoutName, 
   onWorkoutCheckIn, 
   lang = 'pt', 
   activeDate, 
-  setActiveDate 
+  setActiveDate,
+  onRefreshData
 }) {
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [isEditingBasePlan, setIsEditingBasePlan] = useState(false);
@@ -54,6 +59,36 @@ export default function WorkoutPlanner({
     rest: 60,
     weight: 0
   });
+
+  // Estados para o Modal de Recálculo do Plano
+  const [showRecalculateModal, setShowRecalculateModal] = useState(false);
+  const [recalculateForm, setRecalculateForm] = useState({
+    gender: profile?.gender || 'masculino',
+    age: profile?.age || 30,
+    weight: profile?.weight || 80,
+    height: profile?.height || 170,
+    activityLevel: profile?.activityLevel || 'moderado',
+    goal: profile?.goal || 'emagrecimento',
+    workoutDays: profile?.workoutDays || 4,
+    regenerateDiet: false,
+    regenerateWorkout: true
+  });
+
+  // Sincronizar dados do perfil
+  useEffect(() => {
+    if (profile) {
+      setRecalculateForm(prev => ({
+        ...prev,
+        gender: profile.gender || 'masculino',
+        age: profile.age || 30,
+        weight: profile.weight || 80,
+        height: profile.height || 170,
+        activityLevel: profile.activityLevel || 'moderado',
+        goal: profile.goal || 'emagrecimento',
+        workoutDays: profile.workoutDays || 4
+      }));
+    }
+  }, [profile]);
 
   // Atualizar cargas de peso locais ao mudar a ficha selecionada
   useEffect(() => {
@@ -96,6 +131,113 @@ export default function WorkoutPlanner({
       } catch (err) {
         console.error(err);
       }
+    }
+  };
+
+  // Confirmar e recalcular plano completo (dieta, treino ou ambos)
+  const handleConfirmRecalculate = async (e) => {
+    e.preventDefault();
+    
+    const genderVal = recalculateForm.gender;
+    const ageVal = Number(recalculateForm.age);
+    const weightVal = Number(recalculateForm.weight);
+    const heightVal = Number(recalculateForm.height);
+    const activityLevelFactor = Number(recalculateForm.activityLevel);
+    const goalVal = recalculateForm.goal;
+    const workoutDaysVal = Number(recalculateForm.workoutDays);
+
+    // TMB (Mifflin-St Jeor)
+    let calculatedBmr = 0;
+    if (genderVal === 'masculino' || genderVal === 'male') {
+      calculatedBmr = 10 * weightVal + 6.25 * heightVal - 5 * ageVal + 5;
+    } else {
+      calculatedBmr = 10 * weightVal + 6.25 * heightVal - 5 * ageVal - 161;
+    }
+
+    // TDEE
+    const calculatedTdee = Math.round(calculatedBmr * activityLevelFactor);
+
+    // Ajuste calórico por objetivo
+    let calculatedTargetCalories = calculatedTdee;
+    if (goalVal === 'emagrecimento') {
+      calculatedTargetCalories = Math.round(calculatedTdee - 500);
+      if (calculatedTargetCalories < calculatedBmr * 0.9) {
+        calculatedTargetCalories = Math.round(calculatedBmr * 0.9);
+      }
+    } else if (goalVal === 'hipertrofia') {
+      calculatedTargetCalories = Math.round(calculatedTdee + 300);
+    }
+
+    // Macros alvos
+    let pMultiplier = 2.0;
+    let fMultiplier = 0.9;
+    if (goalVal === 'emagrecimento') {
+      pMultiplier = 2.2;
+      fMultiplier = 0.8;
+    } else if (goalVal === 'hipertrofia') {
+      pMultiplier = 2.0;
+      fMultiplier = 1.0;
+    } else {
+      pMultiplier = 1.8;
+      fMultiplier = 0.9;
+    }
+
+    const proteinGrams = Math.round(weightVal * pMultiplier);
+    const fatGrams = Math.round(weightVal * fMultiplier);
+    const proteinCalories = proteinGrams * 4;
+    const fatCalories = fatGrams * 9;
+    const remainingCalories = calculatedTargetCalories - proteinCalories - fatCalories;
+    const carbGrams = Math.round(remainingCalories > 0 ? remainingCalories / 4 : 50);
+
+    try {
+      // 1. Atualizar perfil com novos dados e macros recalculados
+      const profileRes = await axios.put('/api/auth/profile', {
+        gender: genderVal,
+        age: ageVal,
+        weight: weightVal,
+        height: heightVal,
+        activityLevel: activityLevelFactor,
+        goal: goalVal,
+        workoutDays: workoutDaysVal,
+        bmr: calculatedBmr,
+        tdee: calculatedTdee,
+        targetCalories: calculatedTargetCalories,
+        macros: {
+          protein: proteinGrams,
+          carbs: carbGrams,
+          fat: fatGrams
+        }
+      });
+
+      // Atualizar perfil global no frontend
+      setProfile(profileRes.data.profile);
+
+      // 2. Re-gerar Dieta
+      if (recalculateForm.regenerateDiet) {
+        const dietRes = await axios.post('/api/diet/preset', { presetKey: goalVal });
+        if (setDiet) setDiet(dietRes.data);
+      }
+
+      // 3. Re-gerar Treino
+      if (recalculateForm.regenerateWorkout) {
+        let presetKey = 'upperlower4x';
+        if (workoutDaysVal <= 3) {
+          presetKey = 'fullbody3x';
+        } else if (workoutDaysVal >= 5) {
+          presetKey = 'ppl6x';
+        }
+        const workoutRes = await axios.post('/api/workout/preset', { presetKey });
+        setWorkout(workoutRes.data);
+        setSelectedDayIndex(0);
+      }
+
+      // 4. Finalizar
+      setShowRecalculateModal(false);
+      if (onRefreshData) onRefreshData();
+      alert(lang === 'pt' ? 'Plano recalculado com sucesso!' : 'Plan successfully recalculated!');
+    } catch (err) {
+      console.error('Erro ao recalcular plano:', err);
+      alert(lang === 'pt' ? 'Erro ao recalcular plano.' : 'Error recalculating plan.');
     }
   };
 
@@ -245,6 +387,16 @@ export default function WorkoutPlanner({
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
             {lang === 'pt' ? 'Monte suas rotinas padrão (Aside) e registre o que treinou no diário de cada dia (Body).' : 'Plan cards & log active sessions.'}
           </p>
+        </div>
+
+        <div>
+          <button
+            onClick={() => setShowRecalculateModal(true)}
+            className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-extrabold rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw className="w-4 h-4" />
+            {lang === 'pt' ? 'Recalcular Plano' : 'Recalculate Plan'}
+          </button>
         </div>
       </div>
 
@@ -684,6 +836,164 @@ export default function WorkoutPlanner({
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Recálculo do Plano */}
+      {showRecalculateModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in text-zinc-950 dark:text-zinc-50">
+          <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 w-full max-w-md shadow-xl space-y-4 animate-scale-up max-h-[90vh] overflow-y-auto">
+            <div className="text-center space-y-1">
+              <h3 className="text-lg font-extrabold text-zinc-950 dark:text-zinc-50 flex items-center justify-center gap-1.5">
+                <RefreshCw className="w-5 h-5 text-indigo-500" />
+                {lang === 'pt' ? 'Recalcular Dieta e Treino' : 'Recalculate Plan'}
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                {lang === 'pt' ? 'Responda abaixo para atualizar seus dados físicos e regerar seus planos.' : 'Answer below to update physical metrics and regenerate plans.'}
+              </p>
+            </div>
+
+            <form onSubmit={handleConfirmRecalculate} className="space-y-4 text-xs">
+              {/* Sexo e Idade */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Sexo' : 'Gender'}</label>
+                  <select
+                    value={recalculateForm.gender}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, gender: e.target.value })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 focus:outline-none"
+                  >
+                    <option value="masculino">{lang === 'pt' ? 'Masculino' : 'Male'}</option>
+                    <option value="feminino">{lang === 'pt' ? 'Feminino' : 'Female'}</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Idade (anos)' : 'Age (years)'}</label>
+                  <input
+                    type="number"
+                    required
+                    value={recalculateForm.age}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, age: Number(e.target.value) })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Peso e Altura */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Peso (kg)' : 'Weight (kg)'}</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    required
+                    value={recalculateForm.weight}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, weight: Number(e.target.value) })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Altura (cm)' : 'Height (cm)'}</label>
+                  <input
+                    type="number"
+                    required
+                    value={recalculateForm.height}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, height: Number(e.target.value) })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Nível de Atividade Física */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Nível de Atividade' : 'Activity Level'}</label>
+                <select
+                  value={recalculateForm.activityLevel}
+                  onChange={(e) => setRecalculateForm({ ...recalculateForm, activityLevel: Number(e.target.value) })}
+                  className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 focus:outline-none"
+                >
+                  <option value={1.2}>{lang === 'pt' ? 'Sedentário (Pouco/Sem exercício)' : 'Sedentary'}</option>
+                  <option value={1.375}>{lang === 'pt' ? 'Levemente Ativo (1-3 dias/semana)' : 'Lightly Active'}</option>
+                  <option value={1.55}>{lang === 'pt' ? 'Moderadamente Ativo (3-5 dias/semana)' : 'Moderately Active'}</option>
+                  <option value={1.725}>{lang === 'pt' ? 'Altamente Ativo (6-7 dias/semana)' : 'Very Active'}</option>
+                  <option value={1.9}>{lang === 'pt' ? 'Extremamente Ativo (Treino pesado diário)' : 'Extremely Active'}</option>
+                </select>
+              </div>
+
+              {/* Objetivo e Dias de Treino */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Objetivo' : 'Goal'}</label>
+                  <select
+                    value={recalculateForm.goal}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, goal: e.target.value })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 focus:outline-none"
+                  >
+                    <option value="emagrecimento">{lang === 'pt' ? 'Emagrecimento' : 'Fat Loss'}</option>
+                    <option value="manutencao">{lang === 'pt' ? 'Manutenção' : 'Maintenance'}</option>
+                    <option value="hipertrofia">{lang === 'pt' ? 'Hipertrofia' : 'Muscle Gain'}</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase">{lang === 'pt' ? 'Dias de Treino/Semana' : 'Workout Days'}</label>
+                  <select
+                    value={recalculateForm.workoutDays}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, workoutDays: Number(e.target.value) })}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-200 focus:outline-none"
+                  >
+                    <option value={3}>{lang === 'pt' ? '3 dias' : '3 days'}</option>
+                    <option value={4}>{lang === 'pt' ? '4 dias' : '4 days'}</option>
+                    <option value={5}>{lang === 'pt' ? '5 ou mais dias' : '5+ days'}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* O que Re-gerar (Checkboxes) */}
+              <div className="bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-100 dark:border-zinc-800/80 rounded-2xl p-3.5 space-y-2.5">
+                <span className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider block">
+                  {lang === 'pt' ? 'Escolha o que deseja re-gerar' : 'Choose what to regenerate'}
+                </span>
+                
+                <label className="flex items-center gap-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={recalculateForm.regenerateDiet}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, regenerateDiet: e.target.checked })}
+                    className="w-4 h-4 rounded text-blue-600 border-zinc-300 dark:border-zinc-805 bg-white dark:bg-zinc-900 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span>{lang === 'pt' ? 'Recalcular e Re-gerar Dieta Recomendada' : 'Regenerate Recommended Diet'}</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={recalculateForm.regenerateWorkout}
+                    onChange={(e) => setRecalculateForm({ ...recalculateForm, regenerateWorkout: e.target.checked })}
+                    className="w-4 h-4 rounded text-blue-600 border-zinc-300 dark:border-zinc-805 bg-white dark:bg-zinc-900 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span>{lang === 'pt' ? 'Recalcular e Re-gerar Treino Recomendado' : 'Regenerate Recommended Workout'}</span>
+                </label>
+              </div>
+
+              {/* Ações */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRecalculateModal(false)}
+                  className="flex-1 py-2.5 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl text-xs font-bold text-zinc-550 dark:text-zinc-400 cursor-pointer"
+                >
+                  {lang === 'pt' ? 'Cancelar' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={!recalculateForm.regenerateDiet && !recalculateForm.regenerateWorkout}
+                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-extrabold shadow-md cursor-pointer transition-all"
+                >
+                  {lang === 'pt' ? 'Confirmar e Recalcular' : 'Confirm & Recalculate'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -509,6 +509,7 @@ export default function App() {
                 diet={diet}
                 setDiet={handleUpdateDiet}
                 profile={profile}
+                setProfile={setProfile}
                 lang={lang}
                 activeDate={activeDate}
                 setActiveDate={handleActiveDateChange}
@@ -521,11 +522,15 @@ export default function App() {
               <WorkoutPlanner 
                 workout={workout}
                 setWorkout={handleUpdateWorkout}
+                profile={profile}
+                setProfile={setProfile}
+                setDiet={handleUpdateDiet}
                 loggedWorkoutName={loggedWorkoutName}
                 onWorkoutCheckIn={handleWorkoutCheckIn}
                 lang={lang}
                 activeDate={activeDate}
                 setActiveDate={handleActiveDateChange}
+                onRefreshData={() => fetchPlannerAndLogs(false, activeDate)}
               />
             )}
 

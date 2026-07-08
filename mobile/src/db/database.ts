@@ -1,7 +1,8 @@
 import { type SQLiteDatabase } from 'expo-sqlite';
+import { initialFoodDatabase } from '../data/foodDatabase';
 
 export async function migrateDbIfNeeded(db: SQLiteDatabase) {
-  const DATABASE_VERSION = 3;
+  const DATABASE_VERSION = 4;
   
   // Obter a versão atual do banco de dados
   const result = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
@@ -96,6 +97,49 @@ export async function migrateDbIfNeeded(db: SQLiteDatabase) {
       console.log('Tentativa de RENAME COLUMN falhou (coluna meal_name já existe ou tabela vazia):', e);
     }
     await db.execAsync('PRAGMA user_version = 3');
+    currentVersion = 3;
+  }
+
+  if (currentVersion === 3) {
+    try {
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS foods (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          calories INTEGER NOT NULL,
+          protein REAL NOT NULL,
+          carbs REAL NOT NULL,
+          fat REAL NOT NULL,
+          serving_size TEXT DEFAULT '100g',
+          category TEXT NOT NULL
+        );
+      `);
+      console.log('Tabela foods criada no SQLite local (v4).');
+
+      await db.withTransactionAsync(async () => {
+        for (const food of initialFoodDatabase) {
+          await db.runAsync(
+            `INSERT OR IGNORE INTO foods (id, name, calories, protein, carbs, fat, serving_size, category) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              food.id,
+              food.name,
+              food.calories,
+              food.protein,
+              food.carbs,
+              food.fat,
+              food.servingSize,
+              food.category
+            ]
+          );
+        }
+      });
+      console.log('Tabela foods populada no SQLite local com os alimentos da TACO.');
+    } catch (e) {
+      console.error('Erro na migração SQLite v4:', e);
+    }
+    await db.execAsync('PRAGMA user_version = 4');
+    currentVersion = 4;
   }
 }
 

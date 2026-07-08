@@ -210,6 +210,40 @@ router.put('/profile', authMiddleware, async (req, res) => {
   }
 });
 
+// @route   PUT /api/auth/profile/calories
+// @desc    Atualizar rapidamente as metas de calorias e macros diretamente
+router.put('/profile/calories', authMiddleware, async (req, res) => {
+  const { targetCalories, protein, carbs, fat } = req.body;
+
+  if (!targetCalories || protein === undefined || carbs === undefined || fat === undefined) {
+    return res.status(400).json({ error: 'Calorias e macros (proteínas, carboidratos e gorduras) são obrigatórios.' });
+  }
+
+  try {
+    const pool = getPool();
+    await pool.query(
+      `UPDATE users SET 
+        target_calories = ?, 
+        protein_target = ?, 
+        carbs_target = ?, 
+        fat_target = ? 
+      WHERE id = ?`,
+      [targetCalories, protein, carbs, fat, req.userId]
+    );
+
+    const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [req.userId]);
+    const updatedUser = users[0];
+
+    res.json({
+      message: 'Metas calóricas atualizadas com sucesso.',
+      profile: mapUserToClient(updatedUser)
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao atualizar as metas calóricas.' });
+  }
+});
+
 // @route   DELETE /api/auth/account
 // @desc    Excluir a conta do usuário e todos os registros associados
 router.delete('/account', authMiddleware, async (req, res) => {
