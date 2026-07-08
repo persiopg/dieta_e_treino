@@ -2,6 +2,14 @@ import express from 'express';
 import { getPool } from '../config/db.js';
 import authMiddleware from '../middleware/auth.js';
 import { initialDietPresets } from '../../src/data/foodDatabase.js';
+import { createRequire } from 'module';
+import multer from 'multer';
+
+const require = createRequire(import.meta.url);
+const XLSX = require('xlsx');
+
+// Multer: upload em memória (sem salvar disco)
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const router = express.Router();
 
@@ -937,6 +945,171 @@ router.delete('/meal/:mealId/item/:itemId', authMiddleware, async (req, res) => 
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Erro ao excluir alimento.' });
+  }
+});
+
+
+// ============================================================
+// @route   POST /api/diet/import/preview
+// @desc    Faz parse do Excel e retorna preview de macros SEM salvar
+// @access  Private
+// ============================================================
+router.post('/import/preview', authMiddleware, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+
+    // Aceitar aba "Plano Recomendado" ou primeira aba
+    const targetSheet = wb.SheetNames.find(n => n.toLowerCase().includes('plano')) || wb.SheetNames[0];
+    if (!targetSheet) return res.status(400).json({ error: 'Arquivo Excel sem abas válidas.' });
+
+    const ws = wb.Sheets[targetSheet];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+    // Validar cabeçalho (linha 0)
+    const header = (rows[0] || []).map(c => String(c).toLowerCase().trim());
+    const hasRefeicao = header.some(h => h.includes('refei'));
+    const hasAlimento = header.some(h => h.includes('alimento'));
+    const hasKcal    = header.some(h => h.includes('kcal') || h.includes('cal'));
+    if (!hasRefeicao || !hasAlimento || !hasKcal) {
+      return res.status(400).json({
+        error: 'Formato inválido. O arquivo deve ter as colunas: Refeição, Alimento, Quantidade (g), Kcal, Proteínas (g), Carboidratos (g), Gorduras (g).'
+      });
+    }
+
+    // Índices de colunas (flexible)
+    const idxOf = keyword => header.findIndex(h => h.includes(keyword));
+    const iRefeicao  = idxOf('refei');
+    const iAlimento  = idxOf('alimento');
+    const iQtd       = idxOf('quant');
+    const iKcal      = idxOf('kcal') !== -1 ? idxOf('kcal') : idxOf('cal');
+    const iProt      = idxOf('prot');
+    const iCarbs     = idxOf('carb');
+    const iFat       = header.findIndex(h => h.includes('gordu') || h.includes('fat'));
+
+    // Agrupar em refeições
+    const mealsMap = {};
+    let currentMeal = '';
+
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row || row.length === 0) continue;
+
+      const mealCell = String(row[iRefeicao] || '').trim();
+      if (mealCell) currentMeal = mealCell;
+
+      const foodName = String(row[iAlimento] || '').trim();
+      if (!foodName) continue;
+
+      const qty      = Number(row[iQtd]   || 100);
+      const calories = Number(row[iKcal]  || 0);
+      const protein  = Number(row[iProt]  || 0);
+      const carbs    = Number(row[iCarbs] || 0);
+      const fat      = Number(row[iFat]   || 0);
+
+      if (!mealsMap[currentMeal]) mealsMap[currentMeal] = { name: currentMeal, items: [] };
+      mealsMap[currentMeal].items.push({ name: foodName, quantity: qty, calories, protein, carbs, fat });
+    }
+
+    const meals = Object.values(mealsMap);
+    if (meals.length === 0) return res.status(400).json({ error: 'Nenhuma refeição encontrada no arquivo.' });
+
+    // Calcular totais
+    let totalCal = 0, totalProt = 0, totalCarbs = 0, totalFat = 0;
+    meals.forEach(m => m.items.forEach(item => {
+      totalCal   += item.calories;
+      totalProt  += item.protein;
+      totalCarbs += item.carbs;
+      totalFat   += item.fat;
+    }));
+
+    return res.json({
+      ok: true,
+      sheetName: targetSheet,
+      meals,
+      totals: {
+        calories: Math.round(totalCal),
+        protein:  Math.round(totalProt * 10) / 10,
+        carbs:    Math.round(totalCarbs * 10) / 10,
+        fat:      Math.round(totalFat * 10) / 10
+      }
+    });
+  } catch (err) {
+    console.error('Erro no preview de importação:', err);
+    res.status(500).json({ error: 'Erro ao processar o arquivo Excel.' });
+  }
+});
+
+// ============================================================
+// @route   POST /api/diet/import/confirm
+// @desc    Salva o plano importado como plano recomendado do usuário
+// @access  Private
+// ============================================================
+router.post('/import/confirm', authMiddleware, async (req, res) => {
+  const userId = req.user.id;
+  const { meals } = req.body;
+
+  if (!meals || !Array.isArray(meals) || meals.length === 0) {
+    return res.status(400).json({ error: 'Dados do plano inválidos.' });
+  }
+
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // 1. Remover dieta existente
+    const [[existingDiet]] = await conn.query('SELECT id FROM diets WHERE user_id = ? LIMIT 1', [userId]);
+    if (existingDiet) {
+      const dietId = existingDiet.id;
+      const [existingMeals] = await conn.query('SELECT id FROM diet_meals WHERE diet_id = ?', [dietId]);
+      for (const meal of existingMeals) {
+        await conn.query('DELETE FROM diet_meal_items WHERE meal_id = ?', [meal.id]);
+      }
+      await conn.query('DELETE FROM diet_meals WHERE diet_id = ?', [dietId]);
+      await conn.query('DELETE FROM diets WHERE id = ?', [dietId]);
+    }
+
+    // 2. Criar nova dieta
+    const [dietResult] = await conn.query(
+      'INSERT INTO diets (user_id, name, description, goal) VALUES (?, ?, ?, ?)',
+      [userId, 'Plano Importado', 'Plano alimentar importado de arquivo Excel', 'importado']
+    );
+    const dietId = dietResult.insertId;
+
+    // 3. Inserir refeições e itens
+    for (let i = 0; i < meals.length; i++) {
+      const meal = meals[i];
+      const [mealResult] = await conn.query(
+        'INSERT INTO diet_meals (diet_id, name, meal_order) VALUES (?, ?, ?)',
+        [dietId, meal.name, i + 1]
+      );
+      const mealId = mealResult.insertId;
+
+      for (const item of (meal.items || [])) {
+        // calories/protein/carbs/fat no Excel já são valores calculados para a porção
+        // precisamos de valores por 100g para armazenar consistentemente
+        const qty = Number(item.quantity) || 100;
+        const cal100  = qty > 0 ? (Number(item.calories) / qty) * 100 : 0;
+        const prot100 = qty > 0 ? (Number(item.protein)  / qty) * 100 : 0;
+        const carb100 = qty > 0 ? (Number(item.carbs)    / qty) * 100 : 0;
+        const fat100  = qty > 0 ? (Number(item.fat)      / qty) * 100 : 0;
+
+        await conn.query(
+          'INSERT INTO diet_meal_items (meal_id, food_name, quantity, calories, protein, carbs, fat) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [mealId, item.name, qty, Number(cal100.toFixed(1)), Number(prot100.toFixed(2)), Number(carb100.toFixed(2)), Number(fat100.toFixed(2))]
+        );
+      }
+    }
+
+    await conn.commit();
+    res.json({ ok: true, message: 'Plano importado com sucesso!', dietId });
+  } catch (err) {
+    await conn.rollback();
+    console.error('Erro ao confirmar importação:', err);
+    res.status(500).json({ error: 'Erro ao salvar o plano importado.' });
+  } finally {
+    conn.release();
   }
 });
 

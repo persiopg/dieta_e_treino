@@ -1,5 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { initialFoodDatabase } from '../data/foodDatabase';
 import { translations } from '../utils/translations';
 import { 
@@ -21,7 +24,10 @@ import {
   Calendar,
   ArrowRight,
   TrendingUp,
-  FileText
+  FileText,
+  Download,
+  TableIcon,
+  Upload
 } from 'lucide-react';
 
 export default function DietPlanner({ 
@@ -43,6 +49,7 @@ export default function DietPlanner({
   const [selectedFood, setSelectedFood] = useState(null);
   const [selectedQuantity, setSelectedQuantity] = useState(100);
   const [searchQueryResults, setSearchQueryResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   // Estados para edição rápida de calorias e macros
   const [showEditCaloriesModal, setShowEditCaloriesModal] = useState(false);
@@ -55,6 +62,14 @@ export default function DietPlanner({
 
   // Estados para o Modal de Recálculo do Plano
   const [showRecalculateModal, setShowRecalculateModal] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  
+  // Estados para Importação de Dieta
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [importPreviewData, setImportPreviewData] = useState(null);
+  const [importError, setImportError] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
   const [recalculateForm, setRecalculateForm] = useState({
     gender: profile?.gender || 'masculino',
     age: profile?.age || 30,
@@ -123,85 +138,85 @@ export default function DietPlanner({
     }
   }, [profile]);
 
-  // Buscar alimentos para o Diário Alimentar
+  // Helper de normalização de acentos para busca local
+  const normalizeStr = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+  // Buscar alimentos para o Diário Alimentar (com debounce de 300ms)
   useEffect(() => {
     let active = true;
-    const searchFoods = async () => {
-      if (searchTerm.trim() === '') {
-        setSearchResults([]);
-        return;
-      }
+    if (searchTerm.trim() === '') { setSearchResults([]); return; }
+
+    const timer = setTimeout(async () => {
       try {
         const res = await axios.get('/api/foods', { params: { q: searchTerm } });
-        if (active) {
-          setSearchResults(res.data.slice(0, 15));
-        }
+        if (active) setSearchResults(res.data.slice(0, 15));
       } catch (err) {
         console.error('Erro ao buscar alimentos da API no diário:', err);
-        // Fallback local
-        const filtered = initialFoodDatabase.filter(food => 
-          food.name.toLowerCase().includes(searchTerm.toLowerCase())
-        ).slice(0, 15);
+        const q = normalizeStr(searchTerm);
+        const filtered = initialFoodDatabase
+          .filter(food => normalizeStr(food.name).includes(q))
+          .slice(0, 15);
         if (active) setSearchResults(filtered);
       }
-    };
-
-    searchFoods();
-    return () => { active = false; };
+    }, 300);
+    return () => { active = false; clearTimeout(timer); };
   }, [searchTerm]);
 
-  // Buscar alimentos para Substituição
+  // Buscar alimentos para Substituição (com debounce de 300ms)
   useEffect(() => {
     let active = true;
-    const searchSubstituteFoods = async () => {
-      if (substituteSearchTerm.trim() === '') {
-        setSubstituteSearchResults([]);
-        return;
-      }
+    if (substituteSearchTerm.trim() === '') { setSubstituteSearchResults([]); return; }
+
+    const timer = setTimeout(async () => {
       try {
         const res = await axios.get('/api/foods', { params: { q: substituteSearchTerm } });
-        if (active) {
-          setSubstituteSearchResults(res.data.slice(0, 15));
-        }
+        if (active) setSubstituteSearchResults(res.data.slice(0, 15));
       } catch (err) {
         console.error('Erro ao buscar alimentos da API para substituição:', err);
-        // Fallback local
-        const filtered = initialFoodDatabase.filter(food => 
-          food.name.toLowerCase().includes(substituteSearchTerm.toLowerCase())
-        ).slice(0, 15);
+        const q = normalizeStr(substituteSearchTerm);
+        const filtered = initialFoodDatabase
+          .filter(food => normalizeStr(food.name).includes(q))
+          .slice(0, 15);
         if (active) setSubstituteSearchResults(filtered);
       }
-    };
-
-    searchSubstituteFoods();
-    return () => { active = false; };
+    }, 300);
+    return () => { active = false; clearTimeout(timer); };
   }, [substituteSearchTerm]);
 
-  // Buscar alimentos para o Modal do Plano Base
+  // Buscar alimentos para o Modal do Plano Base (com debounce de 300ms)
   useEffect(() => {
     let active = true;
-    const searchBaseFoods = async () => {
-      if (searchQuery.trim() === '') {
-        setSearchQueryResults([]);
-        return;
-      }
+    setSearchLoading(true);
+
+    if (searchQuery.trim() === '') {
+      setSearchQueryResults([]);
+      setSearchLoading(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
       try {
         const res = await axios.get('/api/foods', { params: { q: searchQuery } });
         if (active) {
           setSearchQueryResults(res.data.slice(0, 15));
+          setSearchLoading(false);
         }
       } catch (err) {
         console.error('Erro ao buscar alimentos da API no plano base:', err);
-        // Fallback local
-        const filtered = initialFoodDatabase.filter(food => 
-          food.name.toLowerCase().includes(searchQuery.toLowerCase())
+        // Fallback local com normalização de acentos
+        const normalize = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        const q = normalize(searchQuery);
+        const filtered = initialFoodDatabase.filter(food =>
+          normalize(food.name).includes(q)
         ).slice(0, 15);
-        if (active) setSearchQueryResults(filtered);
+        if (active) {
+          setSearchQueryResults(filtered);
+          setSearchLoading(false);
+        }
       }
-    };
+    }, 300);
 
-    searchBaseFoods();
-    return () => { active = false; };
+    return () => { active = false; clearTimeout(timer); };
   }, [searchQuery]);
 
   // Abrir modal de adição de alimento
@@ -737,6 +752,230 @@ export default function DietPlanner({
   };
 
   // ==========================================
+  // FUNÇÕES DE EXPORTAÇÃO
+  // ==========================================
+  const handleExportExcel = () => {
+    const wb = XLSX.utils.book_new();
+
+    // Aba 1: Plano Recomendado
+    const planRows = [['Refeição', 'Alimento', 'Quantidade (g)', 'Kcal', 'Proteínas (g)', 'Carboidratos (g)', 'Gorduras (g)']];
+    if (diet?.meals) {
+      diet.meals.forEach(meal => {
+        meal.items?.forEach(item => {
+          planRows.push([
+            meal.name,
+            item.name,
+            item.quantity,
+            Math.round((item.calories * item.quantity) / 100),
+            Number(((item.protein * item.quantity) / 100).toFixed(1)),
+            Number(((item.carbs * item.quantity) / 100).toFixed(1)),
+            Number(((item.fat * item.quantity) / 100).toFixed(1))
+          ]);
+        });
+      });
+    }
+    const wsPlano = XLSX.utils.aoa_to_sheet(planRows);
+    wsPlano['!cols'] = [{ wch: 20 }, { wch: 40 }, { wch: 15 }, { wch: 10 }, { wch: 15 }, { wch: 18 }, { wch: 15 }];
+    XLSX.utils.book_append_sheet(wb, wsPlano, 'Plano Recomendado');
+
+    // Aba 2: Diário do Dia
+    const logRows = [['Data', 'Refeição', 'Alimento', 'Quantidade (g)', 'Kcal', 'Proteínas (g)', 'Carboidratos (g)', 'Gorduras (g)']];
+    if (dietLogs?.length > 0) {
+      dietLogs.forEach(log => {
+        logRows.push([
+          activeDate,
+          log.meal_name,
+          log.food_name,
+          Number(log.quantity),
+          Math.round(Number(log.calories)),
+          Number(Number(log.protein).toFixed(1)),
+          Number(Number(log.carbs).toFixed(1)),
+          Number(Number(log.fat).toFixed(1))
+        ]);
+      });
+    }
+    const wsDiario = XLSX.utils.aoa_to_sheet(logRows);
+    wsDiario['!cols'] = [{ wch: 12 }, { wch: 20 }, { wch: 40 }, { wch: 15 }, { wch: 10 }, { wch: 15 }, { wch: 18 }, { wch: 15 }];
+    XLSX.utils.book_append_sheet(wb, wsDiario, `Diário ${activeDate}`);
+
+    XLSX.writeFile(wb, `dieta_${activeDate}.xlsx`);
+  };
+
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    const primaryColor = [99, 102, 241];
+    const grayColor = [80, 80, 80];
+
+    // Cabeçalho
+    doc.setFillColor(...primaryColor);
+    doc.rect(0, 0, 210, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Relatório de Dieta', 14, 12);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Data: ${activeDate}  |  Meta: ${profile?.targetCalories || '--'} kcal`, 14, 22);
+
+    let yPos = 36;
+
+    // Seção: Plano Recomendado
+    if (diet?.meals && diet.meals.length > 0) {
+      doc.setTextColor(...primaryColor);
+      doc.setFontSize(13);
+      doc.setFont('helvetica', 'bold');
+      doc.text('📋 Plano Recomendado', 14, yPos);
+      yPos += 6;
+
+      const planBody = [];
+      diet.meals.forEach(meal => {
+        meal.items?.forEach((item, idx) => {
+          planBody.push([
+            idx === 0 ? meal.name : '',
+            item.name,
+            `${item.quantity}g`,
+            `${Math.round((item.calories * item.quantity) / 100)} kcal`,
+            `P: ${((item.protein * item.quantity) / 100).toFixed(1)}g  C: ${((item.carbs * item.quantity) / 100).toFixed(1)}g  G: ${((item.fat * item.quantity) / 100).toFixed(1)}g`
+          ]);
+        });
+      });
+
+      autoTable(doc, {
+        startY: yPos,
+        head: [['Refeição', 'Alimento', 'Qtd', 'Kcal', 'Macros']],
+        body: planBody,
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [248, 248, 255] },
+        columnStyles: { 0: { fontStyle: 'bold', textColor: primaryColor }, 4: { cellWidth: 55 } },
+        margin: { left: 14, right: 14 }
+      });
+
+      yPos = doc.lastAutoTable.finalY + 10;
+    }
+
+    // Seção: Diário do Dia
+    if (dietLogs?.length > 0) {
+      if (yPos > 230) {
+        doc.addPage();
+        yPos = 20;
+      }
+      doc.setTextColor(...primaryColor);
+      doc.setFontSize(13);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`🍽️ Diário Alimentar — ${activeDate}`, 14, yPos);
+      yPos += 6;
+
+      const logBody = dietLogs.map(log => [
+        log.meal_name,
+        log.food_name,
+        `${Number(log.quantity).toFixed(0)}g`,
+        `${Math.round(Number(log.calories))} kcal`,
+        `P: ${Number(log.protein).toFixed(1)}g  C: ${Number(log.carbs).toFixed(1)}g  G: ${Number(log.fat).toFixed(1)}g`
+      ]);
+
+      autoTable(doc, {
+        startY: yPos,
+        head: [['Refeição', 'Alimento', 'Qtd', 'Kcal', 'Macros']],
+        body: logBody,
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [16, 185, 129], textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [240, 255, 248] },
+        columnStyles: { 0: { fontStyle: 'bold', textColor: [16, 185, 129] }, 4: { cellWidth: 55 } },
+        margin: { left: 14, right: 14 }
+      });
+
+      yPos = doc.lastAutoTable.finalY + 10;
+
+      // Totais
+      const totCal = dietLogs.reduce((s, l) => s + Math.round(Number(l.calories)), 0);
+      const totProt = dietLogs.reduce((s, l) => s + Number(l.protein), 0);
+      const totCarbs = dietLogs.reduce((s, l) => s + Number(l.carbs), 0);
+      const totFat = dietLogs.reduce((s, l) => s + Number(l.fat), 0);
+
+      doc.setFillColor(240, 255, 248);
+      doc.setDrawColor(16, 185, 129);
+      doc.roundedRect(14, yPos, 182, 14, 3, 3, 'FD');
+      doc.setTextColor(...grayColor);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`TOTAL DO DIA:  ${totCal} kcal  |  P: ${totProt.toFixed(1)}g  |  C: ${totCarbs.toFixed(1)}g  |  G: ${totFat.toFixed(1)}g`, 20, yPos + 9);
+    }
+
+    // Rodapé
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(7);
+      doc.setTextColor(180, 180, 180);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`FitLife · Relatório gerado em ${new Date().toLocaleDateString('pt-BR')}`, 14, 292);
+      doc.text(`Página ${i} de ${pageCount}`, 196, 292, { align: 'right' });
+    }
+
+    doc.save(`dieta_${activeDate}.pdf`);
+  };
+
+  // ==========================================
+  // FUNÇÕES DE IMPORTAÇÃO DE PLANO EXCEL
+  // ==========================================
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImportFile(file);
+    setImportError('');
+    setImportPreviewData(null);
+    setImportLoading(true);
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await axios.post('/api/diet/import/preview', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      if (res.data && res.data.ok) {
+        setImportPreviewData(res.data);
+      } else {
+        setImportError(res.data.error || 'Erro ao processar arquivo.');
+      }
+    } catch (err) {
+      console.error(err);
+      setImportError(err.response?.data?.error || 'Erro de rede ao analisar o Excel.');
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importPreviewData || !importPreviewData.meals) return;
+    setImportLoading(true);
+    setImportError('');
+
+    try {
+      const res = await axios.post('/api/diet/import/confirm', {
+        meals: importPreviewData.meals
+      });
+      if (res.data && res.data.ok) {
+        setShowImportModal(false);
+        setImportFile(null);
+        setImportPreviewData(null);
+        if (onRefreshData) {
+          onRefreshData();
+        }
+        alert(lang === 'pt' ? 'Plano de dieta importado com sucesso!' : 'Diet plan imported successfully!');
+      } else {
+        setImportError(res.data.error || 'Erro ao salvar o plano.');
+      }
+    } catch (err) {
+      console.error(err);
+      setImportError(err.response?.data?.error || 'Erro de rede ao salvar plano.');
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  // ==========================================
   // TOTAIS DA DIETA REAL DO DIÁRIO (BODY)
   // ==========================================
   let consumedCal = 0;
@@ -811,7 +1050,47 @@ export default function DietPlanner({
           </p>
         </div>
 
-        <div>
+        <div className="flex items-center gap-2">
+          {/* Botão de Exportação */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(v => !v)}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              {lang === 'pt' ? 'Exportar' : 'Export'}
+            </button>
+            {showExportMenu && (
+              <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+                <div className="p-1.5 space-y-0.5">
+                  <button
+                    onClick={() => { handleExportExcel(); setShowExportMenu(false); }}
+                    className="w-full px-3 py-2.5 text-left text-xs font-bold text-zinc-700 dark:text-zinc-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-700 dark:hover:text-emerald-400 rounded-lg transition-all flex items-center gap-2.5 cursor-pointer"
+                  >
+                    <span className="text-lg">📊</span>
+                    {lang === 'pt' ? 'Exportar Excel (.xlsx)' : 'Export Excel (.xlsx)'}
+                  </button>
+                  <button
+                    onClick={() => { handleExportPDF(); setShowExportMenu(false); }}
+                    className="w-full px-3 py-2.5 text-left text-xs font-bold text-zinc-700 dark:text-zinc-200 hover:bg-rose-50 dark:hover:bg-rose-900/20 hover:text-rose-700 dark:hover:text-rose-400 rounded-lg transition-all flex items-center gap-2.5 cursor-pointer"
+                  >
+                    <span className="text-lg">📄</span>
+                    {lang === 'pt' ? 'Exportar PDF' : 'Export PDF'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Botão de Importação */}
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <Upload className="w-4 h-4" />
+            {lang === 'pt' ? 'Importar' : 'Import'}
+          </button>
+
           <button
             onClick={() => setShowRecalculateModal(true)}
             className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-extrabold rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
@@ -1059,12 +1338,19 @@ export default function DietPlanner({
                       <Search className="absolute left-3 top-3 w-4 h-4 text-zinc-400" />
                       <input
                         type="text"
-                        placeholder={lang === 'pt' ? "Digite batata, frango..." : "Search food..."}
+                        placeholder={lang === 'pt' ? "Ex: iogurte, ovo, frango, arroz..." : "Search food..."}
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-9 pr-4 py-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                        autoFocus
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-9 pr-4 py-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
                       />
                     </div>
+
+                    {searchTerm.trim() !== '' && searchResults.length === 0 && (
+                      <p className="text-xs text-zinc-400 text-center py-1">
+                        🔍 Nenhum resultado para "<strong>{searchTerm}</strong>"
+                      </p>
+                    )}
 
                     {searchResults.length > 0 && (
                       <div className="absolute z-50 bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg mt-1 w-full overflow-hidden max-h-48 overflow-y-auto">
@@ -1412,26 +1698,39 @@ export default function DietPlanner({
                   <Search className="absolute left-3 top-2.5 w-4 h-4 text-zinc-400" />
                   <input
                     type="text"
-                    placeholder="Ex: banana, aveia, frango..."
+                    placeholder="Ex: ovo, frango, aveia, whey..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-9 pr-4 py-2 text-xs focus:outline-none"
+                    autoFocus
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl pl-9 pr-9 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/40"
                   />
+                  {searchLoading && searchQuery.trim() !== '' && (
+                    <div className="absolute right-3 top-2.5 w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                  )}
                 </div>
 
-                <div className="border border-zinc-100 dark:border-zinc-800 rounded-xl divide-y divide-zinc-100 dark:divide-zinc-800 max-h-[200px] overflow-y-auto">
-                  {searchQueryResults.map(food => (
+                <div className="border border-zinc-100 dark:border-zinc-800 rounded-xl divide-y divide-zinc-100 dark:divide-zinc-800 max-h-[220px] overflow-y-auto">
+                  {searchLoading && searchQuery.trim() !== '' ? (
+                    <div className="p-4 text-center text-xs text-zinc-400">Buscando...</div>
+                  ) : searchQuery.trim() !== '' && searchQueryResults.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-zinc-400">
+                      <span className="block text-lg mb-1">🔍</span>
+                      Nenhum alimento encontrado para "<strong>{searchQuery}</strong>"
+                    </div>
+                  ) : (
+                    searchQueryResults.map(food => (
                       <button
                         key={food.id}
                         onClick={() => setSelectedFood(food)}
-                        className={`w-full text-left p-2.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-900 flex justify-between items-center ${
+                        className={`w-full text-left p-2.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-900 flex justify-between items-center transition-colors ${
                           selectedFood?.id === food.id ? 'bg-blue-500/10 font-bold text-blue-600' : 'text-zinc-700 dark:text-zinc-300'
                         }`}
                       >
                         <span>{food.name}</span>
-                        <span className="text-[10px] text-zinc-400 font-mono">{food.calories} kcal / 100g</span>
+                        <span className="text-[10px] text-zinc-400 font-mono shrink-0 ml-2">{food.calories} kcal/100g</span>
                       </button>
-                    ))}
+                    ))
+                  )}
                 </div>
 
                 {selectedFood && (
@@ -1850,6 +2149,151 @@ export default function DietPlanner({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Importação de Dieta (Excel) */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-lg shadow-xl space-y-4 animate-scale-up max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-3">
+              <h3 className="text-lg font-extrabold text-zinc-950 dark:text-zinc-50 flex items-center gap-2">
+                <Upload className="w-5 h-5 text-indigo-500" />
+                {lang === 'pt' ? 'Importar Plano de Dieta' : 'Import Diet Plan'}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportFile(null);
+                  setImportPreviewData(null);
+                  setImportError('');
+                }}
+                className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 text-xs font-bold"
+              >
+                {lang === 'pt' ? 'Fechar' : 'Close'}
+              </button>
+            </div>
+
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              {lang === 'pt'
+                ? 'Selecione uma planilha de dieta exportada (.xlsx) para importar e aplicar como seu novo Plano Recomendado.'
+                : 'Upload a diet spreadsheet (.xlsx) to import as your new Recommended Plan.'}
+            </p>
+
+            {/* Input de Arquivo */}
+            <div className="flex flex-col items-center justify-center border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-indigo-500 dark:hover:border-indigo-500 rounded-xl p-6 transition-all bg-zinc-50 dark:bg-zinc-900/30 relative">
+              <input
+                type="file"
+                accept=".xlsx"
+                onChange={handleFileChange}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+              />
+              <Upload className="w-8 h-8 text-zinc-400 mb-2 animate-bounce" />
+              <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                {importFile ? importFile.name : (lang === 'pt' ? 'Clique ou arraste a planilha aqui' : 'Click or drag spreadsheet here')}
+              </span>
+              <span className="text-[10px] text-zinc-400 mt-1">Apenas arquivos (.xlsx)</span>
+            </div>
+
+            {/* Loading */}
+            {importLoading && (
+              <div className="flex justify-center items-center py-6">
+                <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-xs text-zinc-500 dark:text-zinc-400 ml-2 font-bold">
+                  {lang === 'pt' ? 'Processando dados...' : 'Processing data...'}
+                </span>
+              </div>
+            )}
+
+            {/* Mensagem de Erro */}
+            {importError && (
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900 text-rose-600 dark:text-rose-400 rounded-xl text-xs font-bold text-center">
+                ⚠️ {importError}
+              </div>
+            )}
+
+            {/* Preview da Importação */}
+            {importPreviewData && (
+              <div className="space-y-4 pt-2">
+                <div className="p-4 bg-indigo-50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900 rounded-xl space-y-3">
+                  <h4 className="text-xs font-extrabold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider text-center">
+                    {lang === 'pt' ? 'Resumo dos Macronutrientes a Importar' : 'Macros Summary to Import'}
+                  </h4>
+                  
+                  {/* Totais de Macros Importados */}
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    <div className="bg-white dark:bg-zinc-900 p-2 rounded-lg border border-zinc-100 dark:border-zinc-800">
+                      <span className="block text-[10px] font-bold text-zinc-400 uppercase">Kcal</span>
+                      <span className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+                        {importPreviewData.totals.calories}
+                      </span>
+                    </div>
+                    <div className="bg-white dark:bg-zinc-900 p-2 rounded-lg border border-zinc-100 dark:border-zinc-800">
+                      <span className="block text-[10px] font-bold text-zinc-400 uppercase">Prot (g)</span>
+                      <span className="text-sm font-black text-rose-500">
+                        {importPreviewData.totals.protein}g
+                      </span>
+                    </div>
+                    <div className="bg-white dark:bg-zinc-900 p-2 rounded-lg border border-zinc-100 dark:border-zinc-800">
+                      <span className="block text-[10px] font-bold text-zinc-400 uppercase">Carb (g)</span>
+                      <span className="text-sm font-black text-blue-500">
+                        {importPreviewData.totals.carbs}g
+                      </span>
+                    </div>
+                    <div className="bg-white dark:bg-zinc-900 p-2 rounded-lg border border-zinc-100 dark:border-zinc-800">
+                      <span className="block text-[10px] font-bold text-zinc-400 uppercase">Gord (g)</span>
+                      <span className="text-sm font-black text-amber-500">
+                        {importPreviewData.totals.fat}g
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Lista Simplificada das Refeições do Preview */}
+                <div className="space-y-2 max-h-48 overflow-y-auto border border-zinc-100 dark:border-zinc-800 rounded-xl p-3 bg-zinc-50/50 dark:bg-zinc-900/10">
+                  <h5 className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                    {lang === 'pt' ? 'Estrutura das Refeições' : 'Meals Structure'}
+                  </h5>
+                  {importPreviewData.meals.map((meal, mIdx) => (
+                    <div key={mIdx} className="text-xs border-b border-zinc-100 dark:border-zinc-800 last:border-0 pb-2 mb-2 last:pb-0 last:mb-0">
+                      <div className="flex justify-between items-center font-bold text-zinc-850 dark:text-zinc-200">
+                        <span>🍴 {meal.name}</span>
+                        <span className="text-[10px] text-zinc-400 font-normal">
+                          {meal.items?.length || 0} {meal.items?.length === 1 ? 'item' : 'items'}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-zinc-500 mt-1 line-clamp-2">
+                        {meal.items?.map(i => `${i.name} (${i.quantity}g)`).join(', ')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Botões do Rodapé */}
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImportFile(null);
+                      setImportPreviewData(null);
+                      setImportError('');
+                    }}
+                    className="flex-1 py-2.5 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl text-xs font-bold text-zinc-500 dark:text-zinc-400 transition-all cursor-pointer"
+                  >
+                    {lang === 'pt' ? 'Limpar' : 'Clear'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmImport}
+                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-extrabold shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    {lang === 'pt' ? 'Confirmar Importação' : 'Confirm Import'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

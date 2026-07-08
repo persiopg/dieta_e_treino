@@ -14,14 +14,15 @@ router.get('/', authMiddleware, async (req, res) => {
     const pool = getPool();
 
     if (q && q.trim().length > 0) {
-      // 1. Quebrar em palavras e limpar pontuações, ignorando palavras curtas (<= 2 letras como "de", "e", "o")
+      // Quebrar em palavras e limpar pontuações — aceitar até palavras de 1 letra (ex: "ovo" tem 3, mas "pão" tem 3)
+      // Filtramos apenas strings vazias após limpeza
       const terms = q.trim().split(/\s+/)
         .map(t => t.toLowerCase().replace(/[,.;()]/g, ''))
-        .filter(t => t.length > 2);
+        .filter(t => t.length >= 1);
 
       if (terms.length > 0) {
-        // Cláusulas OR para o WHERE (qualquer termo coincidir)
-        const whereClauses = terms.map(() => 'name LIKE ?');
+        // Cláusulas OR para o WHERE — busca accent-insensitive (utf8mb4_unicode_ci)
+        const whereClauses = terms.map(() => 'name LIKE ? COLLATE utf8mb4_unicode_ci');
         
         // Cláusulas CASE WHEN para o score de relevância
         const scoreClauses = [];
@@ -29,12 +30,12 @@ router.get('/', authMiddleware, async (req, res) => {
 
         // Cada termo que coincidir soma +3 no score
         terms.forEach(t => {
-          scoreClauses.push('(CASE WHEN name LIKE ? THEN 3 ELSE 0 END)');
+          scoreClauses.push('(CASE WHEN name LIKE ? COLLATE utf8mb4_unicode_ci THEN 3 ELSE 0 END)');
           finalParams.push(`%${t}%`);
         });
 
         // Se começar com o primeiro termo, ganha +5 no score
-        scoreClauses.push('(CASE WHEN name LIKE ? THEN 5 ELSE 0 END)');
+        scoreClauses.push('(CASE WHEN name LIKE ? COLLATE utf8mb4_unicode_ci THEN 5 ELSE 0 END)');
         finalParams.push(`${terms[0]}%`);
 
         // Parâmetros do WHERE

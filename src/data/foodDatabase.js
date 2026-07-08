@@ -5928,6 +5928,16 @@ export const initialFoodDatabase = [
     "fat": 59.4,
     "servingSize": "100g",
     "category": "Nozes e sementes"
+  },
+  {
+    "id": "598",
+    "name": "Whey Protein Concentrado",
+    "calories": 120,
+    "protein": 24,
+    "carbs": 3,
+    "fat": 2,
+    "servingSize": "30g",
+    "category": "Suplementos"
   }
 ];
 
