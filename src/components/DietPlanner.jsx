@@ -667,6 +667,8 @@ export default function DietPlanner({
     const remainingCalories = calculatedTargetCalories - proteinCalories - fatCalories;
     const carbGrams = Math.round(remainingCalories > 0 ? remainingCalories / 4 : 50);
 
+    const finalTargetCalories = proteinCalories + fatCalories + (carbGrams * 4);
+
     try {
        // 1. Atualizar perfil com novos dados e macros recalculados
        const profileRes = await axios.put('/api/auth/profile', {
@@ -679,7 +681,7 @@ export default function DietPlanner({
          workoutDays: workoutDaysVal,
          bmr: calculatedBmr,
          tdee: calculatedTdee,
-         targetCalories: calculatedTargetCalories,
+         targetCalories: finalTargetCalories,
          macros: {
            protein: proteinGrams,
            carbs: carbGrams,

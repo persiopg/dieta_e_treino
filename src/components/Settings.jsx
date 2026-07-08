@@ -102,10 +102,12 @@ export default function Settings({ profile, onUpdateProfile, lang }) {
     const remainingCalories = targetCalories - proteinCalories - fatCalories;
     const carbGrams = Math.round(remainingCalories > 0 ? remainingCalories / 4 : 50);
 
+    const finalTargetCalories = proteinCalories + fatCalories + (carbGrams * 4);
+
     setPreviewResult({
       bmr: Math.round(bmr),
       tdee: tdee,
-      targetCalories: targetCalories,
+      targetCalories: finalTargetCalories,
       macros: {
         protein: proteinGrams,
         carbs: carbGrams,

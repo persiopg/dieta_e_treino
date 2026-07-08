@@ -112,6 +112,8 @@ export default function RecommendationWizard({ onApplyPlan, profile }) {
     const remainingCalories = targetCalories - proteinCalories - fatCalories;
     const carbGrams = Math.round(remainingCalories > 0 ? remainingCalories / 4 : 50);
 
+    const finalTargetCalories = proteinCalories + fatCalories + (carbGrams * 4);
+
     // Seleção de preset de treino com base nos dias informados
     let selectedWorkoutPresetKey = 'upperlower4x';
     if (workoutDays <= 3) {
@@ -128,7 +130,7 @@ export default function RecommendationWizard({ onApplyPlan, profile }) {
     setCalculatedResult({
       bmr: Math.round(bmr),
       tdee: tdee,
-      targetCalories: targetCalories,
+      targetCalories: finalTargetCalories,
       macros: {
         protein: proteinGrams,
         carbs: carbGrams,
